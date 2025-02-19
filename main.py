@@ -7,13 +7,15 @@ import math
 import pennylane.numpy as pnp
 import itertools
 
-dev = qml.device("lightning.qubit", wires = 12)
+dev = qml.device("lightning.qubit", wires=18)  
 
 
 def loss(num_qubit, H, answer_train, index): 
 
     H_sigmoid = 1 / (1 + pnp.exp(-H))
     cross_entropy = 0
+    print(H)
+    print(H_sigmoid)
 
     for i  in range (num_qubit * index, num_qubit * (index + 1)):
         cross_entropy += answer_train[i] * pnp.log(H_sigmoid) + (1 - answer_train[i]) * pnp.log(1 - H_sigmoid)
@@ -65,6 +67,7 @@ def encode(num_wire, vector, Theta):
     qml.RZ(Alpha, wires = num_wire + 1)
     qml.RX(Beta, wires = num_wire + 1)
     qml.RZ(Gamma, wires = num_wire + 1) 
+
 
 
 def create_Hamiltonian(num_qubit):
@@ -199,11 +202,12 @@ def train(gate_type):
         init_u2 = init_scale * math.pi/(2 * num_qubit * num_blocks)
         params_u2 = init_u2 * pnp.random.rand(2 * num_qubit * num_blocks)
         for index in range(batch_train):
-            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="adjoint")
+            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="parameter-shift")
             
             for epoch in range(epochs):
                 params_u2, cost = opt_u2.step_and_cost(lambda p: loss(num_qubit, circuit_u2(p), answer_train, index), params_u2)
                 print(f"{epoch}\t{cost}")
+                print(params_u2)
 
         params_train = params_u2
         print(np.array(params_train))
@@ -213,11 +217,12 @@ def train(gate_type):
         init_u3 = init_scale*math.pi/(4 * num_qubit * num_blocks)
         params_u3 = init_u3 * pnp.random.rand(4 * num_qubit * num_blocks)
         for index in range(batch_train):
-            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="adjoint")
+            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="parameter-shift")
             
             for epoch in range(epochs):   
                 params_u3, cost = opt_u3.step_and_cost(lambda p: loss(num_qubit, circuit_u3(p), answer_train, index), params_u3)
                 print(f"{epoch}\t{cost}")
+                print(params_u3)
 
         params_train = params_u3
         print(np.array(params_train))
@@ -228,7 +233,7 @@ def train(gate_type):
 
 
 def accuracy(labels, predictions):
-    acc = sum(abs(l - p) < 0.1 for l, p in zip(labels, predictions))
+    acc = sum(abs(l - p) < 0.5 for l, p in zip(labels, predictions))
     acc = acc / len(labels)
     return acc
 
@@ -266,10 +271,10 @@ inner_radius = 3
 outer_radius = 5
 num_vectors = 48
 sphere_radius = inner_radius + outer_radius
-num_qubit = 12
-ham = create_Hamiltonian(12)
-ham_sparse = qml.SparseHamiltonian(ham.sparse_matrix(), wires=range(12))
-Theta = np.pi/2
+num_qubit = 18
+ham = create_Hamiltonian(18)
+ham_sparse = qml.SparseHamiltonian(ham.sparse_matrix(), wires=range(18))
+Theta = np.pi/4
 
 
 batch_train = int((2 * num_vectors * 0.75 / num_qubit) - 1)
