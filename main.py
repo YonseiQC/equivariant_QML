@@ -24,13 +24,47 @@ def loss(num_qubit, H, answer_train, index):
     return cross_entropy
 
 
-def encode(vector, Alpha, Beta):
+def encode(num_wire, vector, Theta):
 
-    theta = Alpha * np.arccos(vector[2])
-    phi = Beta * np.arctan2(vector[1], vector[0])
+    # theta = Alpha * np.arccos(vector[2])
+    # phi = Beta * np.arctan2(vector[1], vector[0])
     
-    qml.RY(theta, wires=0)  
-    qml.RZ(phi, wires=0)  
+    # qml.RY(theta, wires = num_wire)  
+    # qml.RZ(phi, wires = num_wire)  
+    # qml.RY(theta, wires = num_wire + 1)  
+    # qml.RZ(phi, wires = num_wire + 1)  
+
+    # qml.RX(vector[0] * Alpha, wires = num_wire)
+    # qml.RY(vector[1] * Beta, wires = num_wire)
+    # qml.RZ(vector[2], wires = num_wire)
+    # qml.RX(vector[0] * Alpha, wires = num_wire + 1)
+    # qml.RY(vector[1] * Beta, wires = num_wire + 1)
+    # qml.RZ(vector[2], wires = num_wire + 1)
+
+    # theta = 2 * Alpha * np.arctan(- (np.cos(vector[0]) * np.sin(vector[1]) * np.cos(vector[2]) + np.sin(vector[0]) * np.cos(vector[1]) * np.sin(vector[2])) / (np.cos(vector[0]) * np.sin(vector[1]) * np.sin(vector[2]) - np.sin(vector[0]) * np.cos(vector[1]) * np.cos(vector[2])))
+    # phi = 2 * Beta * np.arctan((np.cos(vector[0]) * np.sin(vector[1]) * np.sin(vector[2]) - np.sin(vector[0]) * np.cos(vector[1]) * np.cos(vector[2])) / np.cos(vector[0]) * np.cos(vector[1]) * np.cos(vector[2]) + np.sin(vector[0]) * np.sin(vector[1]) * np.sin(vector[2]))
+
+    # Alpha = 2 * np.arctan(vector[2] * np.tan(Theta/2))
+    # Beta = 2 * np.arctan(vector[0] * np.tan(Theta/2))
+    # if vector[0] * vector[2] * np.tan(Theta/2) == vector[1]: 
+    #     print("1")
+    # else:
+    #     print("0")
+
+    # qml.RZ(Alpha, wires = num_wire)
+    # qml.RX(Beta, wires = num_wire)
+    # qml.RZ(Alpha, wires = num_wire + 1)
+    # qml.RX(Beta, wires = num_wire + 1)
+
+    Alpha = np.arctan(vector[2] * np.tan(Theta/2)) + np.arctan(vector[1]/vector[0])
+    Gamma = np.arctan(vector[2] * np.tan(Theta/2)) - np.arctan(vector[1]/vector[0])
+    Beta = 2 * np.arccos(vector[2] * np.sin(Theta/2) / np.sin((Alpha + Gamma)/2))
+    qml.RZ(Alpha, wires = num_wire)
+    qml.RX(Beta, wires = num_wire)
+    qml.RZ(Gamma, wires = num_wire)
+    qml.RZ(Alpha, wires = num_wire + 1)
+    qml.RX(Beta, wires = num_wire + 1)
+    qml.RZ(Gamma, wires = num_wire + 1) 
 
 
 def create_Hamiltonian(num_qubit):
@@ -44,15 +78,17 @@ def create_Hamiltonian(num_qubit):
 
 def prepare_init_state(num_qubit):
     for i in range(0, num_qubit, 2):
-        create_singlet(i, i+1) # 궁금증이 있는게 3qubit gate도 여기다가 적용하는게 맞나?
+        create_singlet(i, i+1) 
 
 
-def create_u2_circuit(num_qubit, num_blocks, H, Alpha, Beta, data, index):
+def create_u2_circuit(num_qubit, num_blocks, H, Theta, data, index):
 
     def circuit_2qubits(params):
         prepare_init_state(num_qubit)
-        for vector in data[num_qubit * index : num_qubit * (index + 1)]:
-            encode(vector, Alpha, Beta)
+        for i, vector in enumerate(data[num_qubit * index : num_qubit * (index + 1)]):
+            num_wire = i % num_qubit
+            if num_wire % 2 == 0:
+                encode(num_wire, vector, Theta)
 
         k = 0
         for l in range(num_blocks):
@@ -73,13 +109,15 @@ def create_u2_circuit(num_qubit, num_blocks, H, Alpha, Beta, data, index):
     return circuit_2qubits
 
 
-def create_u3_circuit(num_qubit, num_blocks, H, Alpha, Beta, data, index):
+def create_u3_circuit(num_qubit, num_blocks, H, Theta, data, index):
 
     def circuit_3qubits(params):
 
         prepare_init_state(num_qubit)
-        for vector in data[num_qubit * index : num_qubit * (index + 1)]:
-            encode(vector, Alpha, Beta)
+        for i, vector in enumerate(data[num_qubit * index : num_qubit * (index + 1)]):
+            num_wire = i % num_qubit
+            if i % 2 == 0:
+                encode(num_wire, vector, Theta)
 
         k = 0
         for l in range(num_blocks):
@@ -161,7 +199,7 @@ def train(gate_type):
         init_u2 = init_scale * math.pi/(2 * num_qubit * num_blocks)
         params_u2 = init_u2 * pnp.random.rand(2 * num_qubit * num_blocks)
         for index in range(batch_train):
-            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Alpha, Beta, feats_train, index), dev, diff_method="adjoint")
+            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="adjoint")
             
             for epoch in range(epochs):
                 params_u2, cost = opt_u2.step_and_cost(lambda p: loss(num_qubit, circuit_u2(p), answer_train, index), params_u2)
@@ -175,7 +213,7 @@ def train(gate_type):
         init_u3 = init_scale*math.pi/(4 * num_qubit * num_blocks)
         params_u3 = init_u3 * pnp.random.rand(4 * num_qubit * num_blocks)
         for index in range(batch_train):
-            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Alpha, Beta, feats_train, index), dev, diff_method="adjoint")
+            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_train, index), dev, diff_method="adjoint")
             
             for epoch in range(epochs):   
                 params_u3, cost = opt_u3.step_and_cost(lambda p: loss(num_qubit, circuit_u3(p), answer_train, index), params_u3)
@@ -200,7 +238,7 @@ def predict(gate_type, params_train):
     if (gate_type) == ("u2"):
         predictions = []
         for index in range(batch_pre):
-            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Alpha, Beta, feats_val, index), dev)
+            circuit_u2 = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_val, index), dev)
             pred = circuit_u2(params_train)
             pred_sigmoid = 1 / (1 + np.exp(-pred))
             for  i in range(num_qubit):
@@ -212,7 +250,7 @@ def predict(gate_type, params_train):
     if (gate_type) == ("u3"):
         predictions = []        
         for index in range(batch_pre):
-            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Alpha, Beta, feats_val, index), dev)
+            circuit_u3 = qml.QNode(create_u3_circuit(num_qubit, num_blocks, ham_sparse, Theta, feats_val, index), dev)
             pred = circuit_u3(params_train)
             pred_sigmoid = 1 / (1 + np.exp(-pred))  
             predictions.append(float(pred_sigmoid)) 
@@ -231,8 +269,8 @@ sphere_radius = inner_radius + outer_radius
 num_qubit = 12
 ham = create_Hamiltonian(12)
 ham_sparse = qml.SparseHamiltonian(ham.sparse_matrix(), wires=range(12))
-Alpha = 1
-Beta =1 
+Theta = np.pi/2
+
 
 batch_train = int((2 * num_vectors * 0.75 / num_qubit) - 1)
 batch_pre = int((2 * num_vectors - num_qubit * (batch_train + 1)) / num_qubit)
