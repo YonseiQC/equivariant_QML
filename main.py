@@ -188,10 +188,10 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, **adam_opt):
 
 
 # Load dataset
-dataset = np.load('dataset.npz')
-
 num_qubit = 18
 Theta = 8.0
+
+dataset = np.load(f'dataset_{num_qubit}.npz')
 
 num_blocks = 4
 init_scale = 1
