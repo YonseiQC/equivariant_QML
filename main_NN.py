@@ -120,7 +120,6 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, **adam_opt):
         params_c = MyNN().init(key, dummy_input)
 
         params ={"q" : params_q, "c" : params_c}
-        # params = params['c']['params']['Dense_0']['bias'].astype(jnp.float64) 여기서 문제 나는데... 왜지...
 
         u2_circuit = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham, Theta), device = dev, interface='jax')
         u2_circuit = jax.jit(u2_circuit)
