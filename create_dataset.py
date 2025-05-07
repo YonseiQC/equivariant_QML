@@ -30,11 +30,22 @@ def _create_dataset(num_dataset, num_vectors):
 
     return dataset_x, dataset_y
 
-num_vectors = 18
 num_train_dataset = 1024
 num_test_dataset = 256
 
-train_dataset_x, train_dataset_y = _create_dataset(num_train_dataset, num_vectors)
-test_dataset_x, test_dataset_y = _create_dataset(num_test_dataset, num_vectors)
+def make_point(type, num_vectors, num_reupload):
+    if type == "single":
+        train_dataset_x, train_dataset_y = _create_dataset(num_train_dataset, num_vectors)
+        test_dataset_x, test_dataset_y = _create_dataset(num_test_dataset, num_vectors)
 
-np.savez(f'dataset_{num_vectors}.npz', train_dataset_x = train_dataset_x, train_dataset_y = train_dataset_y, test_dataset_x = test_dataset_x, test_dataset_y = test_dataset_y)
+        np.savez(f'dataset_{num_vectors}.npz', train_dataset_x = train_dataset_x, train_dataset_y = train_dataset_y, test_dataset_x = test_dataset_x, test_dataset_y = test_dataset_y)
+        print("succeed")
+    
+    elif type == "multiple":
+        train_dataset_x, train_dataset_y = _create_dataset(num_train_dataset, num_vectors * num_reupload)
+        test_dataset_x, test_dataset_y = _create_dataset(num_test_dataset, num_vectors * num_reupload)
+
+        np.savez(f'dataset_{num_vectors}_{num_reupload}.npz', train_dataset_x = train_dataset_x, train_dataset_y = train_dataset_y, test_dataset_x = test_dataset_x, test_dataset_y = test_dataset_y)
+        print("succeed")
+
+make_point("single", 12, 0)
