@@ -61,7 +61,7 @@ def create_u2_circuit(num_qubit, num_blocks_reupload, num_blocks_circuit, H, The
         prepare_init_state(num_qubit)
         k = 0
         for i in range(num_reupload):
-            data = data_pt[i]
+            data = data_pt[:,i,:,:]
             encode(data / Theta)
 
             for l in range(num_blocks_reupload):
@@ -122,9 +122,10 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
     assert len(train_dataset_x) % minibatch_size == 0
     batch_size = len(train_dataset_x)
 
-    test_dataset_x = test_dataset_x.reshape(num_reupload, 256, -1, 3)
-    train_dataset_x = train_dataset_x.reshape(batch_size // minibatch_size, num_reupload, minibatch_size, -1, 3)
+    test_dataset_x = test_dataset_x.reshape(256, num_reupload, -1, 3)
+    train_dataset_x = train_dataset_x.reshape(batch_size // minibatch_size, minibatch_size, num_reupload, -1, 3)
     train_dataset_y = train_dataset_y.reshape(batch_size // minibatch_size, minibatch_size)
+    # print(train_dataset_x)
     ham = create_Hamiltonian(num_qubit)
 
     if gate_type == "u2":
@@ -215,9 +216,14 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
 
 
 # Load dataset
-num_qubit = 4
+num_qubit = 8
 Theta = 1
-num_reupload = 4
+num_reupload = 3
+gate_type = "u2"
+test_learning_rate = 0.01
+num_blocks_reupload = 2
+num_blocks_circuit = 2
+init_scale = 0.05
 
 dev = qml.device("default.qubit", wires = num_qubit)
 dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
@@ -229,4 +235,4 @@ def result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circui
     print(f'qubits = {num_qubit}, gate_type = {gate_type}, test_learning_rate = {test_learning_rate}, num_blocks_reupload = {num_blocks_reupload}, num_blocks_circuit = {num_blocks_circuit}, init_scale= {init_scale}')
     train(gate_type, dataset, 16, Theta, epochs, key_r, init_scale, num_blocks_reupload, num_blocks_circuit, learning_rate = test_learning_rate)
 
-result("u2", 0.01, 2, 6, 0.05)
+result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale)
