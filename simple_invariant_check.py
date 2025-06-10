@@ -26,6 +26,7 @@ def NN_circuit(dataset, params):
 
 
 def encode(point):
+    print(point[2,:,:])
     point_sqr = jnp.power(point, 2)
     norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
     
@@ -102,11 +103,12 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
         params_c = MyNN().init(key, dummy_input)
 
         params ={"q" : params_q, "c" : params_c}
+        print(params)
 
 
 
         u2_circuit = qml.QNode(create_u2_circuit(num_qubit, num_blocks, ham, Theta), device = dev, interface='jax')
-        u2_circuit = jax.jit(u2_circuit)
+        # u2_circuit = jax.jit(u2_circuit)
 
         expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
         logits = NN_circuit(expval_ham, params)
@@ -128,7 +130,6 @@ key, key_r = jax.random.split(key)
 def result(gate_type, test_learning_rate, num_blocks, init_scale):
     print(f'qubits = {num_qubit}, gate_type = {gate_type}, test_learning_rate = {test_learning_rate}, num_blocks = {num_blocks}, init_scale= {init_scale}')
     train(gate_type, dataset, 16, Theta, epochs, key_r, init_scale, num_blocks, learning_rate = test_learning_rate)
-print("1111111111")
 result("u2", 0.01, 2, 0.05)
 
 dataset = np.load(f'dataset_{num_qubit}_rotation.npz')
