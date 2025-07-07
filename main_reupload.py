@@ -265,7 +265,7 @@ init_scale = 0.05
 dev = qml.device("default.qubit", wires = num_qubit)
 dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
 epochs = 40
-l2 = 0.0001
+l2 = 0.00001
 
 key, key_r = jax.random.split(key)
 
