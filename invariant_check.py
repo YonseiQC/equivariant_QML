@@ -132,10 +132,14 @@ def create_u2_circuit(num_qubit, num_blocks_reupload, num_blocks_circuit, H, The
 
     
 def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, num_blocks_reupload, num_blocks_circuit, **adam_opt):
-    train_dataset_x = dataset['train_dataset_x']
-    train_dataset_y = dataset['train_dataset_y']
-    test_dataset_x = dataset['test_dataset_x']
-    test_dataset_y = dataset['test_dataset_y']
+    train_dataset_x = dataset['train_dataset_x'][:4096]
+    train_dataset_y = dataset['train_dataset_y'][:4096]
+    test_dataset_x = dataset['test_dataset_x'][:256]
+    test_dataset_y = dataset['test_dataset_y'][:256]
+    # train_dataset_x = dataset['train_dataset_x']
+    # train_dataset_y = dataset['train_dataset_y']
+    # test_dataset_x = dataset['test_dataset_x']
+    # test_dataset_y = dataset['test_dataset_y']
     assert len(train_dataset_x) == len(train_dataset_y)
     assert len(train_dataset_x) % minibatch_size == 0
     batch_size = len(train_dataset_x)
@@ -191,6 +195,7 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
         test_dataset_y = test_dataset_y[:, None]
         expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
         logits = NN_circuit(expval_ham, params)
+        print(logits)
         return logits
 
     else:
@@ -199,8 +204,8 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
 
 # Load dataset
 num_qubit = 8
-Theta = 10
-num_reupload = 2
+Theta = 3
+num_reupload = 1
 gate_type = "u2"
 test_learning_rate = 0.001
 num_blocks_reupload = 2
@@ -209,16 +214,17 @@ init_scale = 0.05
 epochs = 1
 
 dev = qml.device("default.qubit", wires = num_qubit)
-dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
+dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}.npz')
+# dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
 key, key_r = jax.random.split(key)
-print(f'dataset_{num_qubit}_{num_reupload}.npz')
 
 def result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale):
     train(gate_type, dataset, 16, Theta, epochs, key_r, init_scale, num_blocks_reupload, num_blocks_circuit, learning_rate = test_learning_rate)
 
 a = result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale)
 
-dataset = np.load(f'dataset_{num_qubit}_{num_reupload}_rotation.npz')
+dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_rotation.npz')
+# dataset = np.load(f'dataset_{num_qubit}_{num_reupload}_rotation.npz')
 
 b = result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale)
 if np.array_equal(a, b) == True:
@@ -226,6 +232,8 @@ if np.array_equal(a, b) == True:
 else:
     print("They are not rotation invariant")
 
+
+# 위의 equal 부분 틀린 듯
 # torus의 norm이 작아서 키움
 # 사실 torus의 norm이 너무 편차가 큰 것이 문제여서 norm을 1이하로 줄여주는 Theta 찾아서 나눠줌
 # Beta값이 1을 넘어가면 수치불안정성이 커져서 beta값이 1을 넘어가는 주기를 파악하고 그 주기에 수가 오지 못하도록 Theta를 설정함
