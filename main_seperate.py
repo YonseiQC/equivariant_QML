@@ -19,15 +19,17 @@ key = jax.random.key(1557)
 
 
 class MyNN(nn.Module):
+    num_classes: int
+    
     @nn.compact
     def __call__(self, x):
         x = nn.Dense(features = math.comb(num_qubit, 2))(x)
         x = nn.relu(x)
-        x = nn.Dense(features = num_classes)(x)
+        x = nn.Dense(features = self.num_classes)(x)
         return x
 
-def NN_circuit(dataset, params):
-    return MyNN().apply(params["c"], dataset)
+def NN_circuit(dataset, params, num_classes):
+    return MyNN(num_classes=num_classes).apply(params["c"], dataset)
     
 
 def get_Theta(point):
@@ -179,7 +181,7 @@ def create_u3_circuit(num_qubit, num_blocks_reupload, num_blocks_circuit, H):
     return u3_circuit
 
 
-def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_blocks_reupload, num_blocks_circuit, num_classes, **adam_opt):
+def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scale, num_blocks_reupload, num_blocks_circuit, num_classes, **adam_opt):
     train_dataset_x = dataset['train_dataset_x']
     train_dataset_y = dataset['train_dataset_y']
     test_dataset_x = dataset['test_dataset_x']
@@ -213,7 +215,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
         params_q = init_u2 * jax.random.uniform(key, (2 * num_qubit * (num_blocks_reupload * num_reupload + num_blocks_circuit),))
 
         dummy_input = jnp.ones((1, math.comb(num_qubit, 2)))  
-        params_c = MyNN().init(key, dummy_input)
+        params_c = MyNN(num_classes_q).init(key, dummy_input)
 
         params = {"q" : params_q, "c" : params_c}
 
@@ -225,8 +227,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
 
         def loss_fn(params, mini_batch_x, mini_batch_y, l2):
             expval_ham = (jnp.array(u2_circuit(params, mini_batch_x))).T
-            logits = NN_circuit(expval_ham, params)
-
+            logits = NN_circuit(expval_ham, params, num_classes_q)
             # sample_weights = jnp.array([class_weights[int(label)] for label in mini_batch_y])
             # loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y) * sample_weights)
             loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y))
@@ -260,23 +261,26 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
 
         print("Quantum Parameter Optimization")
         
-        for i in range(9):
-            for j in range(i + 1, 10):
+        for i in range(8):
+            for j in range(i + 1, 9):
+                original_classes = [i, j]
                 index_train = jnp.where((train_dataset_y == i) | (train_dataset_y == j))
-                train_dataset_x_q = train_dataset_x[index_train].reshape(batch_size // minibatch_size, minibatch_size, num_reupload, -1, 3)
-                train_dataset_y_q = train_dataset_y[index_train].reshape(batch_size  // minibatch_size, minibatch_size)   
+                train_dataset_x_q = train_dataset_x[index_train].reshape((batch_size // minibatch_size) // 5, minibatch_size, num_reupload, -1, 3)
+                train_dataset_y_q = train_dataset_y[index_train].reshape((batch_size  // minibatch_size) // 5, minibatch_size) 
+                train_dataset_y_q = jnp.where(train_dataset_y_q == i, 0, 1)  
                 index_test = jnp.where((test_dataset_y == i) | (test_dataset_y == j))
                 test_dataset_x_q = test_dataset_x[index_test]
                 test_dataset_y_q = test_dataset_y[index_test]
+                test_dataset_y_q = jnp.where(test_dataset_y_q == i, 0, 1)
 
-                for epoch in range(epochs):
+                for epoch in range(epochs_q):
                     train_loss = 0
-                    for i in range(batch_size // minibatch_size):
-                        loss, grad = jax.value_and_grad(loss_fn_q_only, argnums = 0)(params["q"], train_dataset_x_q[i], train_dataset_y_q[i], l2)
+                    for l in range((batch_size // minibatch_size) // 5):
+                        loss, grad = jax.value_and_grad(loss_fn_q_only, argnums = 0)(params["q"], train_dataset_x_q[l], train_dataset_y_q[l], l2)
                         # loss, grad = jax.value_and_grad(loss_fn, argnums=0)(params, train_dataset_x[i], train_dataset_y[i])
                         updates, opt_state_q = solver_q.update(grad, opt_state_q, params["q"])
                         params["q"] = optax.apply_updates(params["q"], updates)
-                        train_loss += loss / (batch_size // minibatch_size)           
+                        train_loss += loss / ((batch_size // minibatch_size) // 5)           
                         # expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
                         # logits = NN_circuit(expval_ham, params)
                         # print(jnp.mean((logits > 0) == test_dataset_y))
@@ -286,7 +290,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
                     
                     test_loss = loss_fn(params, test_dataset_x_q, test_dataset_y_q, l2) 
                     expval_ham = (jnp.array(u2_circuit(params, test_dataset_x_q))).T
-                    logits = NN_circuit(expval_ham, params)
+                    logits = NN_circuit(expval_ham, params, num_classes_q)
                     
                     predictions = jnp.argmax(logits, axis=-1)
                     succed = jnp.mean(predictions == test_dataset_y_q.squeeze())
@@ -299,15 +303,15 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
                     print(test_loss)
                     print(f"Qunatum_{epoch}, {succed}")
                     
-                    for i, acc in enumerate(class_accuracies):
-                        print(f"Class {i}: {acc:.4f}")
+                    for idx, acc in enumerate(class_accuracies):
+                        print(f"Class {original_classes[idx]}: {acc:.4f}")
                     print("-" * 30)
 
         solver_c = optax.adam(**adam_opt)
         opt_state_c = solver_c.init(params["c"])
     
         print("Classical Parameter Optimization")
-        for epoch in range(epochs):
+        for epoch in range(epochs_c):
             train_loss = 0
             for i in range(batch_size // minibatch_size):
                 loss, grad = jax.value_and_grad(loss_fn_c_only, argnums = 0)(params["c"], train_dataset_x[i], train_dataset_y[i], l2)
@@ -324,7 +328,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
             
             test_loss = loss_fn(params, test_dataset_x, test_dataset_y, l2) 
             expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
-            logits = NN_circuit(expval_ham, params)
+            logits = NN_circuit(expval_ham, params, num_classes_q)
             
             predictions = jnp.argmax(logits, axis=-1)
             succed = jnp.mean(predictions == test_dataset_y.squeeze())
@@ -337,8 +341,8 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
             print(test_loss)
             print(f"Classical_{epoch}, {succed}")
             
-            for i, acc in enumerate(class_accuracies):
-                print(f"Class {i}: {acc:.4f}")
+            for idx, acc in enumerate(class_accuracies):
+                print(f"Class {idx}: {acc:.4f}")
             print("-" * 30)
         
         final_expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
@@ -434,7 +438,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
         succed_lst = []
         class_accuracies_history = []
         
-        for epoch in range(epochs):
+        for epoch in range(epochs_c):
             train_loss = 0
             for i in range(batch_size // minibatch_size):
                 loss, grad = jax.value_and_grad(loss_fn, argnums=0)(params, train_dataset_x[i], train_dataset_y[i], l2)
@@ -466,7 +470,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
             print("-" * 30)
         
         final_expval_ham = (jnp.array(u3_circuit(params, test_dataset_x))).T
-        final_logits = NN_circuit(final_expval_ham, params)
+        final_logits = NN_circuit(final_expval_ham, params, num_classes)
         final_predictions = jnp.argmax(final_logits, axis=-1)
         
         final_cm, final_class_acc, final_overall_acc = calculate_final_metrics(
@@ -545,17 +549,19 @@ dev = qml.device("default.qubit", wires = num_qubit)
 dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_balanced_train{point_class_train}_test{point_class_test}.npz')
 # dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}.npz')
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
-print(get_Theta(dataset))
+# print(get_Theta(dataset))
 test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
+num_classes_q = 2
 Theta = 1.44
-epochs = 40
+epochs_q = 10
+epochs_c = 40
 l2 = 0.00001
 key, key_r = jax.random.split(key)
 
 def result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale):
     print(f'qubits = {num_qubit}, gate_type = {gate_type}, test_learning_rate = {test_learning_rate}, num_blocks_reupload = {num_blocks_reupload}, num_blocks_circuit = {num_blocks_circuit}, init_scale= {init_scale}, num_reupload = {num_reupload}, Theta = {Theta}')
-    train(gate_type, dataset, 32, epochs, key_r, init_scale, num_blocks_reupload, num_blocks_circuit, learning_rate = test_learning_rate, num_classes = num_classes)
+    train(gate_type, dataset, 32, epochs_q, epochs_c, key_r, init_scale, num_blocks_reupload, num_blocks_circuit, learning_rate = test_learning_rate, num_classes = num_classes)
 
 result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale)
 
