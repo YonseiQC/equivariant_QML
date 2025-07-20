@@ -225,15 +225,26 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
         # drawer = qml.draw(u2_circuit, show_all_wires=True, decimals=None)
         # print(drawer(params, test_dataset_x))
 
-        def loss_fn(params, mini_batch_x, mini_batch_y, l2):
-            expval_ham = (jnp.array(u2_circuit(params, mini_batch_x))).T
-            logits = NN_circuit(expval_ham, params, num_classes_q)
+        def loss_fn_q_only(params_q, mini_batch_x, mini_batch_y, l2):
+            params_opt_q = {"q": params_q, "c": params["c"]}
+            expval_ham = (jnp.array(u2_circuit(params_opt_q, mini_batch_x))).T
+            logits = NN_circuit(expval_ham, params_opt_q, num_classes_q)
             # sample_weights = jnp.array([class_weights[int(label)] for label in mini_batch_y])
             # loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y) * sample_weights)
             loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y))
-            l2_penalty = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params))
+            l2_penalty = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params_opt_q))
             return (loss + l2_penalty)
 
+        def loss_fn_c_only(params_c, mini_batch_x, mini_batch_y, l2):
+            params_opt_c = {"q": params["q"], "c": params_c} 
+            expval_ham = (jnp.array(u2_circuit(params_opt_c, mini_batch_x))).T
+            logits = NN_circuit(expval_ham, params_opt_c, num_classes)
+            # sample_weights = jnp.array([class_weights[int(label)] for label in mini_batch_y])
+            # loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y) * sample_weights)
+            loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, mini_batch_y))
+            l2_penalty = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params_opt_c))
+            return (loss + l2_penalty)
+        
         """
         @jax.jit
         def training_loop_inner(params, opt_state, train_dataset_x, train_dataset_y):
@@ -242,14 +253,6 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
             params = optax.apply_updates(params, updates)   
             return params
         """
-
-        def loss_fn_q_only(params_q, x, y, l2):
-            params_opt_q = {"q": params_q, "c": params["c"]} 
-            return loss_fn(params_opt_q, x, y, l2)
-
-        def loss_fn_c_only(params_c, x, y, l2):
-            params_opt_c = {"q": params["q"], "c": params_c} 
-            return loss_fn(params_opt_c, x, y, l2)
 
         train_loss_lst = []
         test_loss_lst = []
@@ -288,7 +291,7 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
                     train_loss_lst.append(train_loss)
                     print(train_loss) 
                     
-                    test_loss = loss_fn(params, test_dataset_x_q, test_dataset_y_q, l2) 
+                    test_loss = loss_fn_q_only(params["q"], test_dataset_x_q, test_dataset_y_q, l2) 
                     expval_ham = (jnp.array(u2_circuit(params, test_dataset_x_q))).T
                     logits = NN_circuit(expval_ham, params, num_classes_q)
                     
@@ -307,10 +310,18 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
                         print(f"Class {original_classes[idx]}: {acc:.4f}")
                     print("-" * 30)
 
-        solver_c = optax.adam(**adam_opt)
-        opt_state_c = solver_c.init(params["c"])
+
+        print("Saving quantum parameters...")
+        quantum_params_trained = params["q"].copy()  
+        jnp.savez(f'trained_quantum_params_{num_qubit}_{num_reupload}.npz', quantum_params = quantum_params_trained) 
+        print("Quantum parameters saved successfully!")
     
         print("Classical Parameter Optimization")
+        dummy_input = jnp.ones((1, math.comb(num_qubit, 2)))  
+        params["c"] = MyNN(num_classes).init(key, dummy_input)
+        
+        solver_c = optax.adam(**adam_opt)
+        opt_state_c = solver_c.init(params["c"])
         for epoch in range(epochs_c):
             train_loss = 0
             for i in range(batch_size // minibatch_size):
@@ -326,7 +337,7 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
             train_loss_lst.append(train_loss)
             print(train_loss) 
             
-            test_loss = loss_fn(params, test_dataset_x, test_dataset_y, l2) 
+            test_loss = loss_fn_c_only(params["c"], test_dataset_x, test_dataset_y, l2) 
             expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
             logits = NN_circuit(expval_ham, params, num_classes)
             
@@ -346,7 +357,7 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
             print("-" * 30)
         
         final_expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
-        final_logits = NN_circuit(final_expval_ham, params)
+        final_logits = NN_circuit(final_expval_ham, params, num_classes)
         final_predictions = jnp.argmax(final_logits, axis=-1)
         
         final_cm, final_class_acc, final_overall_acc = calculate_final_metrics(
@@ -554,7 +565,7 @@ test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
 num_classes_q = 2
 Theta = 1.44
-epochs_q = 10
+epochs_q = 1
 epochs_c = 40
 l2 = 0.00001
 key, key_r = jax.random.split(key)
