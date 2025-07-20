@@ -261,8 +261,8 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
 
         print("Quantum Parameter Optimization")
         
-        for i in range(8):
-            for j in range(i + 1, 9):
+        for i in range(9):
+            for j in range(i + 1, 10):
                 original_classes = [i, j]
                 index_train = jnp.where((train_dataset_y == i) | (train_dataset_y == j))
                 train_dataset_x_q = train_dataset_x[index_train].reshape((batch_size // minibatch_size) // 5, minibatch_size, num_reupload, -1, 3)
@@ -328,7 +328,7 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
             
             test_loss = loss_fn(params, test_dataset_x, test_dataset_y, l2) 
             expval_ham = (jnp.array(u2_circuit(params, test_dataset_x))).T
-            logits = NN_circuit(expval_ham, params, num_classes_q)
+            logits = NN_circuit(expval_ham, params, num_classes)
             
             predictions = jnp.argmax(logits, axis=-1)
             succed = jnp.mean(predictions == test_dataset_y.squeeze())
