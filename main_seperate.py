@@ -319,7 +319,7 @@ def train(gate_type, dataset, minibatch_size, epochs_q, epochs_c, key, init_scal
         print("Classical Parameter Optimization")
         dummy_input = jnp.ones((1, math.comb(num_qubit, 2)))  
         params["c"] = MyNN(num_classes).init(key, dummy_input)
-        
+
         solver_c = optax.adam(**adam_opt)
         opt_state_c = solver_c.init(params["c"])
         for epoch in range(epochs_c):
@@ -550,14 +550,14 @@ point_class_test = 40
 num_qubit = 8
 num_reupload = 1
 gate_type = "u2"
-test_learning_rate = 0.005
+test_learning_rate = 0.001
 num_blocks_reupload = 7
 num_blocks_circuit = 0
-init_scale = 0.02
+init_scale = 0.01
 dev = qml.device("default.qubit", wires = num_qubit)
 
 # dataset = np.load(f'modelnet40_2classes_{num_qubit}_{num_reupload}.npz')
-dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_balanced_train{point_class_train}_test{point_class_test}.npz')
+dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
 # dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}.npz')
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
 # print(get_Theta(dataset))
@@ -565,9 +565,9 @@ test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
 num_classes_q = 2
 Theta = 1.44
-epochs_q = 1
+epochs_q = 10
 epochs_c = 40
-l2 = 0.00001
+l2 = 0.0001
 key, key_r = jax.random.split(key)
 
 def result(gate_type, test_learning_rate, num_blocks_reupload, num_blocks_circuit, init_scale):
