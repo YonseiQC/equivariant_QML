@@ -209,7 +209,6 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
         
         solver = optax.adam(**adam_opt)
         opt_state = solver.init(params)
-        test_dataset_y = test_dataset_y[:, None]
         
         train_loss_lst = []
         test_loss_lst = []
