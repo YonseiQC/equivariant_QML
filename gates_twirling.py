@@ -76,7 +76,7 @@ class Spin_2_twirling(qml.operation.Operation):
         Gate = jnp.zeros((dim, dim), dtype=complex)
         for i in range(0, num_qubit - 1):
                 for j in range(i + 1, num_qubit):
-                    Gate += Spin_2_twirling.i_and_j(num_qubit, i, j, operator[0]) + Spin_3_twirling.i_and_j(num_qubit, i, j, operator[1]) + Spin_3_twirling.i_and_j(num_qubit, i, j, operator[2])
+                    Gate += Spin_2_twirling.i_and_j(num_qubit, i, j, operator[0]) + Spin_2_twirling.i_and_j(num_qubit, i, j, operator[1]) + Spin_2_twirling.i_and_j(num_qubit, i, j, operator[2])
         eigenvals, U = eigh(Gate)
 
         return [qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
