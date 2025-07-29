@@ -5,7 +5,7 @@ import itertools
 import jax.numpy as jnp
 
 
-class Spin_2_twirling(qml.operation.Operation):
+class Spin_3_twirling(qml.operation.Operation):
     num_params = 1
     num_wires = qml.operation.AnyWires
     grad_method = "F"
@@ -47,7 +47,7 @@ class Spin_2_twirling(qml.operation.Operation):
         qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
         qml.QubitUnitary(U, wires=range(num_qubit))]
 
-class Spin_3_twirling(qml.operation.Operation):
+class Spin_2_twirling(qml.operation.Operation):
     num_params = 1
     num_wires = qml.operation.AnyWires
     grad_method = "F"
