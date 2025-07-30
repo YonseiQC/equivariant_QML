@@ -33,7 +33,7 @@ class MyNN(nn.Module):
         x = nn.relu(x)
         x = nn.Dense(features=16)(x)        
         x = nn.relu(x)
-        x = nn.Dense(features=10)(x)  
+        x = nn.Dense(features=4)(x)  
         return x
     
 def NN_circuit(dataset, params):
@@ -155,7 +155,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
     assert len(train_dataset_x) % minibatch_size == 0
     batch_size = len(train_dataset_x)
 
-    test_dataset_x = test_dataset_x.reshape(400, num_reupload, -1, 3)
+    test_dataset_x = test_dataset_x.reshape(512, num_reupload, -1, 3)
     # point_sqr = jnp.power(test_dataset_x, 2)
     # norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
     # test_dataset_x = test_dataset_x / norms.reshape(test_dataset_x.shape[0], num_reupload, num_qubit, 1)
@@ -317,18 +317,21 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
 num_qubit = 8
 num_reupload = 2
 gate_type = "u2"
-test_learning_rate = 0.001
+test_learning_rate = 0.005
 num_blocks_reupload = 6
 init_scale = 0.05
 dev = qml.device("default.qubit", wires = num_qubit)
 point_class_train = 960
 point_class_test = 40
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
-dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
-Theta = 10
+Theta = 11
+# dataset = np.load(f'modelnet40_10classes_{num_qubit}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
+dataset = np.load(f'dataset_4class_{num_qubit}_{num_reupload}.npz')
+# Theta = 1.44
+print(get_Theta(dataset))
 test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
-epochs = 50
+epochs = 4
 l2 = 0.00001
 key, key_r = jax.random.split(key)
 
