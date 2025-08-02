@@ -1,8 +1,66 @@
 from jax.numpy.linalg import eigh
-from scipy.sparse import kron, eye
 import pennylane as qml
 import itertools
 import jax.numpy as jnp
+
+
+
+class Spin_2_twirling(qml.operation.Operation):
+    num_params = 1
+    num_wires = qml.operation.AnyWires
+    grad_method = "F"
+    
+    @staticmethod
+    def pauli_sum_function(i, num_qubit):
+        qubit1 = 2 * i
+        qubit2 = 2 * i + 1
+        
+        X = jnp.array([[0, 1], [1, 0]], dtype=complex)
+        Y = jnp.array([[0, -1j], [1j, 0]], dtype=complex)
+        Z = jnp.array([[1, 0], [0, -1]], dtype=complex)
+        identity = jnp.array([[1, 0], [0, 1]], dtype=complex)
+        operators = [X, Y, Z]
+        
+        results = []
+        for op in operators: 
+            matrices1 = [identity] * num_qubit
+            matrices1[qubit1] = op
+            result1 = matrices1[0]
+            for j in range(1, num_qubit):
+                result1 = jnp.kron(result1, matrices1[j])
+            
+            matrices2 = [identity] * num_qubit
+            matrices2[qubit2] = op
+            result2 = matrices2[0]
+            for j in range(1, num_qubit):
+                result2 = jnp.kron(result2, matrices2[j])
+            
+            results.append(result1 + result2)
+    
+        return tuple(results) 
+
+    @staticmethod
+    def compute_decomposition(theta, wires):
+        num_qubit = len(wires)
+        dim = 2 ** num_qubit
+        num_point = int(num_qubit / 2)
+        Gate = jnp.zeros((dim, dim), dtype=complex)
+        for i in range(0, num_point - 1):
+                for j in range(i + 1, num_point):
+                    operator_1 = Spin_2_twirling.pauli_sum_function(i, num_qubit)
+                    operator_2 = Spin_2_twirling.pauli_sum_function(j, num_qubit)
+                    Gate += operator_1[0] @ operator_2[0] + operator_1[1] @ operator_2[1] + operator_1[2] @ operator_2[2]
+        eigenvals, U = eigh(Gate)
+
+        return [
+            qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
+            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
+            qml.QubitUnitary(U, wires=range(num_qubit))
+        ]
+
+
+
+
 
 
 class Spin_3_twirling(qml.operation.Operation):
@@ -11,74 +69,70 @@ class Spin_3_twirling(qml.operation.Operation):
     grad_method = "F"
 
     @staticmethod
-    def i_and_j_and_k(num_qubit, i, j, k, pauli):
-        ops = []
-        for idx in range(0, num_qubit):
-            if idx == i:
-                ops.append(pauli[0])
-            elif idx == j:
-                ops.append(pauli[1])
-            elif idx == k:
-                ops.append(pauli[2])
-            else:
-                ops.append(jnp.array([[1,0],[0,1]]))
-        result = ops[0]
-        for op in ops[1:]:
-            result = jnp.kron(result, op)
-        return result
-    
-    @staticmethod
-    def compute_decomposition(theta, wires):
-        num_qubit = len(wires)
-        dim = 2 ** num_qubit
+    def pauli_sum_function(i, num_qubit):
+        qubit1 = 2 * i
+        qubit2 = 2 * i + 1
+        
         X = jnp.array([[0, 1], [1, 0]], dtype=complex)
         Y = jnp.array([[0, -1j], [1j, 0]], dtype=complex)
         Z = jnp.array([[1, 0], [0, -1]], dtype=complex)
-        operator = [X, Y, Z]
-        Gate = jnp.zeros((dim, dim), dtype=complex)
-        for perm in itertools.permutations(operator):
-            for i in range(0, num_qubit - 2):
-                for j in range(i + 1, num_qubit - 1):
-                    for k in range(j + 1, num_qubit):
-                        Gate += Spin_3_twirling.i_and_j_and_k(num_qubit, i, j, k, perm)
-        eigenvals, U = eigh(Gate)
+        identity = jnp.array([[1, 0], [0, 1]], dtype=complex)
+        operators = [X, Y, Z]
+        
+        results = []
+        for op in operators: 
+            matrices1 = [identity] * num_qubit
+            matrices1[qubit1] = op
+            result1 = matrices1[0]
+            for j in range(1, num_qubit):
+                result1 = jnp.kron(result1, matrices1[j])
+            
+            matrices2 = [identity] * num_qubit
+            matrices2[qubit2] = op
+            result2 = matrices2[0]
+            for j in range(1, num_qubit):
+                result2 = jnp.kron(result2, matrices2[j])
+            
+            results.append(result1 + result2)
+        return tuple(results)
 
-        return [qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
-        qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
-        qml.QubitUnitary(U, wires=range(num_qubit))]
-
-class Spin_2_twirling(qml.operation.Operation):
-    num_params = 1
-    num_wires = qml.operation.AnyWires
-    grad_method = "F"
-    
     @staticmethod
-    def i_and_j(num_qubit, i, j, pauli):
-        ops = []
-        for idx in range(0, num_qubit):
-            if idx == i or idx == j:
-                ops.append(pauli)
-            else:
-                ops.append(jnp.array([[1,0],[0,1]]))
-        result = ops[0]
-        for op in ops[1:]:
-            result = jnp.kron(result, op)
-        return result
+    def compute_i_j_k_term(operator_1, operator_2, operator_3):
+
+        X_i, Y_i, Z_i = operator_1
+        X_j, Y_j, Z_j = operator_2  
+        X_k, Y_k, Z_k = operator_3
+        
+        terms = [
+            X_i @ Y_j @ Z_k,  # X_i Y_j Z_k
+            X_i @ Z_j @ Y_k,  # X_i Z_j Y_k  
+            Y_i @ Z_j @ X_k,  # Y_i Z_j X_k
+            Y_i @ X_j @ Z_k,  # Y_i X_j Z_k
+            Z_i @ X_j @ Y_k,  # Z_i X_j Y_k
+            Z_i @ Y_j @ Z_k,  # Z_i Y_j Z_k
+        ]
+        
+        return terms[0] - terms[1] + terms[2] - terms[3] + terms[4] - terms[5]
 
     @staticmethod
     def compute_decomposition(theta, wires):
         num_qubit = len(wires)
         dim = 2 ** num_qubit
-        X = jnp.array([[0, 1], [1, 0]], dtype=complex)
-        Y = jnp.array([[0, -1j], [1j, 0]], dtype=complex)
-        Z = jnp.array([[1, 0], [0, -1]], dtype=complex)
-        operator = [X, Y, Z]
-        Gate = jnp.zeros((dim, dim), dtype=complex)
-        for i in range(0, num_qubit - 1):
-                for j in range(i + 1, num_qubit):
-                    Gate += Spin_2_twirling.i_and_j(num_qubit, i, j, operator[0]) + Spin_2_twirling.i_and_j(num_qubit, i, j, operator[1]) + Spin_2_twirling.i_and_j(num_qubit, i, j, operator[2])
-        eigenvals, U = eigh(Gate)
+        num_point = int(num_qubit / 2)
+        Gate = jnp.zeros((dim, dim), dtype=complex) 
+        
+        for i in range(0, num_point - 2):
+            for j in range(i + 1, num_point - 1):
+                for k in range(j + 1, num_point):
 
-        return [qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
-        qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
-        qml.QubitUnitary(U, wires=range(num_qubit))]
+                    operator_1 = Spin_3_twirling.pauli_sum_function(i, num_qubit)
+                    operator_2 = Spin_3_twirling.pauli_sum_function(j, num_qubit)
+                    operator_3 = Spin_3_twirling.pauli_sum_function(k, num_qubit)
+                    Gate += Spin_3_twirling.compute_i_j_k_term(operator_1, operator_2, operator_3)
+    
+        eigenvals, U = eigh(Gate)
+        return [
+            qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
+            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
+            qml.QubitUnitary(U, wires=range(num_qubit))
+        ]
