@@ -139,7 +139,7 @@ def NN_circuit(dataset, params):
 #         qml.RZ(Gamma_Transpose[i], wires = 2 * i)
 
 
-def encode(point):
+def encode(point, num_qubit):  # ✅ num_qubit 매개변수 추가
     point_sqr = jnp.power(point, 2)
     norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
     nx, ny, nz = point[:,:,0] / norms, point[:,:,1] / norms, point[:,:,2] / norms
@@ -159,7 +159,7 @@ def encode(point):
         ])
         matrix_i = jnp.moveaxis(matrix_i, [0, 1, 2], [1, 2, 0])
         
-        qml.QubitUnitary(matrix_i, wires=2 * i + 1)
+        qml.QubitUnitary(matrix_i, wires=2 * i)
 
 def create_Hamiltonian(num_point):
     terms = []
@@ -173,14 +173,14 @@ def prepare_init_state(num_qubit):
         create_singlet(i, i+1) 
 
 
-def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, H):
+def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, H):  # ✅ Theta 매개변수 추가
 
     def twirling_circuit(params, data_pt): 
         prepare_init_state(num_qubit)
         k = 0
         for i in range(num_reupload):
             data = data_pt[:,i,:,:]
-            encode(data / Theta)
+            encode(data / Theta, num_qubit)  # ✅ num_qubit 매개변수 전달
 
             for l in range(num_blocks_reupload):
                 Spin_2_twirling(params["q"][k], wires = range(num_qubit))
@@ -192,7 +192,7 @@ def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, H):
     return twirling_circuit
 
     
-def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_blocks_reupload, **adam_opt):
+def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, num_blocks_reupload, num_qubit, num_reupload, **adam_opt):  # ✅ 필요한 매개변수들 추가
     train_dataset_x = dataset['train_dataset_x']
     train_dataset_y = dataset['train_dataset_y']
     test_dataset_x = dataset['test_dataset_x']
@@ -223,7 +223,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
 
         params = {"q" : params_q, "c" : params_c}
 
-        twirling_circuit = qml.QNode(create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, ham), device = dev, interface='jax')
+        twirling_circuit = qml.QNode(create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, ham), device = dev, interface='jax')  # ✅ Theta 매개변수 전달
         twirling_circuit = jax.jit(twirling_circuit)
 
         # drawer = qml.draw(u2_circuit, show_all_wires=True, decimals=None)
@@ -235,7 +235,7 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
             logits = NN_circuit(expval_ham, params)
             mini_batch_y = mini_batch_y[:, None]
             loss = jnp.mean(optax.losses.sigmoid_binary_cross_entropy(logits, mini_batch_y))
-            l2_penalty = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params))
+            l2_penalty = l2 * jnp.sum(jnp.array([jnp.sum(jnp.square(p)) for p in jax.tree_leaves(params)]))            
             return (loss + l2_penalty)
             # return loss
 
@@ -309,7 +309,7 @@ num_qubit = 8
 num_reupload = 1
 gate_type = "u2"
 test_learning_rate = 0.003
-num_blocks_reupload = 6
+num_blocks_reupload = 8
 init_scale = 0.03
 dev = qml.device("default.qubit", wires = num_qubit)
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
@@ -322,9 +322,9 @@ epochs = 40
 l2 = 0.00001
 key, key_r = jax.random.split(key)
 
-def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale):
+def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale):  # ✅ 함수 시그니처 정리
     print(f'qubits = {num_qubit}, gate_type = {gate_type}, test_learning_rate = {test_learning_rate}, num_blocks_reupload = {num_blocks_reupload}, init_scale= {init_scale}, num_reupload = {num_reupload}, Theta = {Theta}, data = {dataset}')
-    train(gate_type, dataset, 32, epochs, key_r, init_scale, num_blocks_reupload, learning_rate = test_learning_rate)
+    train(gate_type, dataset, 32, Theta, epochs, key_r, init_scale, num_blocks_reupload, num_qubit, num_reupload, learning_rate = test_learning_rate)  # ✅ 모든 필요한 매개변수 전달
 
 result(gate_type, test_learning_rate, num_blocks_reupload, init_scale)
 
