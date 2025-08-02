@@ -48,7 +48,9 @@ class MyNN(nn.Module):
         x = nn.Dense(features=1)(x)  
         
         return x
-    
+def NN_circuit(dataset, params):
+    return MyNN().apply(params["c"], dataset)
+
 
 # class MyNN(nn.Module):
 #     @nn.compact
@@ -117,29 +119,47 @@ class MyNN(nn.Module):
         
 #         return features
 
-def NN_circuit(dataset, params):
-    return MyNN().apply(params["c"], dataset)
+
+
+
+# def encode(point):
+#     point_sqr = jnp.power(point, 2)
+#     norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
+#     nx, ny, nz = point[:,:,0] / norms, point[:,:,1] / norms, point[:,:,2] / norms
+
+#     Alpha = jnp.arctan2(-(nz * jnp.tan(norms)),1) + jnp.arctan2(-nx, ny)
+#     Gamma = jnp.arctan2(-(nz * jnp.tan(norms)),1) - jnp.arctan2(-nx, ny)
+#     Beta = 2 * jnp.arcsin(jnp.sin(norms) * nx / jnp.sin((Alpha - Gamma) / 2))
+#     Alpha_Transpose = Alpha.T
+#     Beta_Transpose = Beta.T
+#     Gamma_Transpose = Gamma.T
+#     for i in range(int(num_qubit/2)):
+#         qml.RZ(Alpha_Transpose[i], wires= 2 * i)
+#         qml.RY(Beta_Transpose[i], wires = 2 * i)
+#         qml.RZ(Gamma_Transpose[i], wires = 2 * i)
 
 
 def encode(point):
     point_sqr = jnp.power(point, 2)
     norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
     nx, ny, nz = point[:,:,0] / norms, point[:,:,1] / norms, point[:,:,2] / norms
-
-    Alpha = jnp.arctan2(-(nz * jnp.tan(norms)),1) + jnp.arctan2(-nx, ny)
-    Gamma = jnp.arctan2(-(nz * jnp.tan(norms)),1) - jnp.arctan2(-nx, ny)
-    Beta = 2 * jnp.arcsin(jnp.sin(norms) * nx / jnp.sin((Alpha - Gamma) / 2))
-    Alpha_Transpose = Alpha.T
-    Beta_Transpose = Beta.T
-    Gamma_Transpose = Gamma.T
-    for i in range(int(num_qubit/2)):
-        qml.RZ(Alpha_Transpose[i], wires= 2 * i)
-        qml.RY(Beta_Transpose[i], wires = 2 * i)
-        qml.RZ(Gamma_Transpose[i], wires = 2 * i)
-        # qml.RZ(Alpha_Transpose[i], wires= 2 * i + 1)
-        # qml.RY(Beta_Transpose[i], wires = 2 * i + 1)
-        # qml.RZ(Gamma_Transpose[i], wires = 2 * i + 1)
-
+    
+    norms_T = norms.T  
+    nx_T = nx.T        
+    ny_T = ny.T        
+    nz_T = nz.T       
+    
+    for i in range(int(num_qubit / 2)):
+        cos_n = jnp.cos(norms_T[i])
+        sin_n = jnp.sin(norms_T[i])
+        nx_i, ny_i, nz_i = nx_T[i], ny_T[i], nz_T[i]
+        matrix_i = jnp.array([
+            [cos_n + 1j * sin_n * nz_i, 1j * sin_n * nx_i + sin_n * ny_i],
+            [1j * sin_n * nx_i - sin_n * ny_i, cos_n - 1j * sin_n * nz_i]
+        ])
+        matrix_i = jnp.moveaxis(matrix_i, [0, 1, 2], [1, 2, 0])
+        
+        qml.QubitUnitary(matrix_i, wires=2 * i + 1)
 
 def create_Hamiltonian(num_point):
     terms = []
@@ -193,7 +213,6 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
     train_dataset_y = train_dataset_y.reshape(batch_size // minibatch_size, minibatch_size)
 
     ham = create_Hamiltonian(int(num_qubit/2))
-    print(ham)
 
     if gate_type == "u2":
         init_u2 = init_scale * math.pi/(2 * (num_blocks_reupload * num_reupload))
@@ -237,23 +256,13 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
         test_loss_lst = []
         succed_lst = []
 
-        recent_grads = []
-        current_lr_scale = 1.0
-
         for epoch in range(epochs):
             train_loss = 0
             epoch_grads = [] 
             
             for i in range(batch_size // minibatch_size):
                 loss, grad = jax.value_and_grad(loss_fn, argnums=0)(params, train_dataset_x[i], train_dataset_y[i], l2)
-
-                grad_flat = jax.tree_util.tree_flatten(grad)[0]
-                grad_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in grad_flat))
-                epoch_grads.append(float(grad_norm))
-                
-                scaled_grad = jax.tree_map(lambda g: g * current_lr_scale, grad)
-                
-                updates, opt_state = solver.update(scaled_grad, opt_state, params)
+                updates, opt_state = solver.update(grad, opt_state, params)
                 params = optax.apply_updates(params, updates)
                 train_loss += loss / (batch_size // minibatch_size)
 
@@ -299,16 +308,16 @@ def train(gate_type, dataset, minibatch_size, epochs, key, init_scale, num_block
 num_qubit = 8
 num_reupload = 1
 gate_type = "u2"
-test_learning_rate = 0.005
+test_learning_rate = 0.003
 num_blocks_reupload = 6
-init_scale = 0.02
+init_scale = 0.03
 dev = qml.device("default.qubit", wires = num_qubit)
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
 dataset = np.load(f'dataset_{int(num_qubit/2)}_{num_reupload}.npz')
 # dataset = np.load(f'modelnet40_2classes_{num_qubit}_{num_reupload}_fps_train960_test40.npz')
 
 print(get_Theta(dataset))
-Theta = 18
+Theta = 20
 epochs = 40
 l2 = 0.00001
 key, key_r = jax.random.split(key)
