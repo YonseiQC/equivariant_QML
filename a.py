@@ -50,75 +50,6 @@ def NN_circuit(dataset, params):
     return MyNN().apply(params["c"], dataset)
 
 
-# class MyNN(nn.Module):
-#     @nn.compact
-#     def __call__(self, x):
-        
-#         if x.ndim == 3: 
-
-#             features_list = []
-#             for i in range(x.shape[0]):
-#                 sample = x[i].flatten()
-#                 features_list.append(self.extract_features(sample))
-#             features = jnp.stack(features_list, axis=0)
-#         else:  
-#             features = self.extract_features(x.flatten())
-#             features = jnp.expand_dims(features, 0)
-
-#         x = nn.Dense(features=19)(features)
-#         x = nn.relu(x)
-#         x = nn.Dense(features=16)(x)
-#         x = nn.relu(x)
-#         x = nn.Dense(features=1)(x)
-        
-#         return x
-    
-#     def extract_features(self, x):
-        
-#         mean_val = jnp.mean(x)
-#         max_val = jnp.max(x)
-#         min_val = jnp.min(x)
-#         std_val = jnp.std(x)
-#         variance = jnp.var(x)
-
-#         median = jnp.median(x)
-#         q25 = jnp.percentile(x, 25)
-#         q75 = jnp.percentile(x, 75)
-        
-#         range_val = max_val - min_val
-#         iqr = q75 - q25
-        
-#         mean_centered = x - mean_val
-#         skewness = jnp.mean((mean_centered / (std_val + 1e-10)) ** 3)
-#         kurtosis = jnp.mean((mean_centered / (std_val + 1e-10)) ** 4) - 3
-
-#         positive_count = jnp.sum(x > 0) / len(x)
-#         above_mean_count = jnp.sum(x > mean_val) / len(x)
-        
-#         coeff_var = std_val / (mean_val)
-    
-#         harmonic_mean = len(x) / jnp.sum(1 / (x))
-
-#         geometric_mean = jnp.exp(jnp.mean(jnp.log(x)))
-        
-#         norm = jnp.linalg.norm(x)
-
-#         log_mean = jnp.mean(jnp.log(x))
-        
-#         features = jnp.array([
-#             mean_val, max_val, min_val, std_val, variance,           # 5개: 기본
-#             # median, q25, q75,                                        # 3개: 분위수
-#             # range_val, iqr,                                          # 2개: 범위
-#             # skewness, kurtosis,                                      # 2개: 모멘트
-#             # positive_count, above_mean_count, coeff_var,             # 3개: 비율
-#             # harmonic_mean, geometric_mean, norm,                     # 3개: 양수용
-#             # log_mean                                                 # 1개: 로그
-#         ])
-        
-#         return features
-
-
-
 
 # def encode(point):
 #     point_sqr = jnp.power(point, 2)
@@ -137,7 +68,7 @@ def NN_circuit(dataset, params):
 #         qml.RZ(Gamma_Transpose[i], wires = 2 * i)
 
 
-def encode(point, num_qubit):  # ✅ num_qubit 매개변수 추가
+def encode(point, num_qubit):  
     point_sqr = jnp.power(point, 2)
     norms = jnp.sqrt(jnp.sum(point_sqr, axis = -1))
     nx, ny, nz = point[:,:,0] / norms, point[:,:,1] / norms, point[:,:,2] / norms
@@ -171,7 +102,7 @@ def prepare_init_state(num_qubit):
         create_singlet(i, i+1) 
 
 
-def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, H):  # ✅ Theta 매개변수 추가
+def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, H):  
 
     def twirling_circuit(params, data_pt): 
         prepare_init_state(num_qubit)
@@ -190,7 +121,7 @@ def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta,
     return twirling_circuit
 
     
-def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, num_blocks_reupload, num_qubit, num_reupload, **adam_opt):  # ✅ 필요한 매개변수들 추가
+def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, num_blocks_reupload, num_qubit, num_reupload, **adam_opt):  
     train_dataset_x = dataset['train_dataset_x']
     train_dataset_y = dataset['train_dataset_y']
     test_dataset_x = dataset['test_dataset_x']
@@ -221,7 +152,7 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
 
         params = {"q" : params_q, "c" : params_c}
 
-        twirling_circuit = qml.QNode(create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, ham), device = dev, interface='jax')  # ✅ Theta 매개변수 전달
+        twirling_circuit = qml.QNode(create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, ham), device = dev, interface='jax')  
         twirling_circuit = jax.jit(twirling_circuit)
 
         # drawer = qml.draw(u2_circuit, show_all_wires=True, decimals=None)
@@ -290,6 +221,8 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
             print(test_loss)
             print(f"{epoch}, {succed}")
             succed_lst.append(succed)
+        max_success = max(succed_lst)
+        print(f"최대 테스트 정확도: {max_success:.4f}")
         plt.plot(test_loss_lst, label='Test Loss', marker='o', linestyle='-', color='b')
         plt.plot(train_loss_lst, label='Training Loss', marker='o', linestyle='-', color='r')
         plt.plot(succed_lst, label='Test Accuracy', marker='o', linestyle='-', color='y')
@@ -316,7 +249,7 @@ dataset = np.load(f'dataset_{int(num_qubit/2)}_{num_reupload}.npz')
 
 print(get_Theta(dataset))
 Theta = 20
-epochs = 40
+epochs = 4
 l2 = 0.00001
 key, key_r = jax.random.split(key)
 
