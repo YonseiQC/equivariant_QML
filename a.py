@@ -29,11 +29,9 @@ class MyNN(nn.Module):
     def __call__(self, x):
 
         x = jnp.expand_dims(x, axis=-1)
-        x = nn.Dense(features=28)(x)  
+        x = nn.Dense(features=30)(x)  
         x = nn.relu(x)
-        x = nn.Dense(features=28)(x) 
-        x = nn.relu(x)
-        x = nn.Dense(features=28)(x)
+        x = nn.Dense(features=30)(x) 
 
         mean_pool = jnp.mean(x, axis=1)
         max_pool = jnp.max(x, axis=1) 
@@ -41,9 +39,9 @@ class MyNN(nn.Module):
         std_pool = jnp.std(x, axis=1)
 
         x = jnp.concatenate([mean_pool, max_pool, min_pool, std_pool], axis=-1)
-        x = nn.Dense(features=28)(x) 
+        x = nn.Dense(features=30)(x) 
         x = nn.relu(x)
-        x = nn.Dense(features=16)(x) 
+        x = nn.Dense(features=15)(x) 
         x = nn.relu(x)
         x = nn.Dense(features=1)(x)  
         
