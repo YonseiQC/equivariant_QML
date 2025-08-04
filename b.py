@@ -154,10 +154,10 @@ def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta,
     
 def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, num_blocks_reupload, num_qubit, num_reupload, **adam_opt):  
     train_dataset_x = dataset['train_dataset_x']
-    train_dataset_x = train_dataset_x - jnp.mean(train_dataset_x, axis = 0)
+    # train_dataset_x = train_dataset_x - jnp.mean(train_dataset_x, axis = 0)
     train_dataset_y = dataset['train_dataset_y']
     test_dataset_x = dataset['test_dataset_x']
-    test_dataset_x = test_dataset_x - jnp.mean(test_dataset_x, axis = 0)
+    # test_dataset_x = test_dataset_x - jnp.mean(test_dataset_x, axis = 0)
     test_dataset_y = dataset['test_dataset_y']
     assert len(train_dataset_x) == len(train_dataset_y)
     assert len(train_dataset_x) % minibatch_size == 0
@@ -293,23 +293,24 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
                                     target_names=[f'Class {i}' for i in range(num_classes)]))
 
 
-num_qubit = 8
+num_qubit = 6
 num_reupload = 1
 gate_type = "u2"
-test_learning_rate = 0.005
-num_blocks_reupload = 6
+test_learning_rate = 0.003
+num_blocks_reupload = 7
 init_scale = 0.01
 dev = qml.device("default.qubit", wires = num_qubit)
 point_class_train = 960
 point_class_test = 40
 
-Theta = 2
-dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
+Theta = 1.7
+# dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
+dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}_new.npz')
 
 print(get_Theta(dataset))
 test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
-epochs = 4
+epochs = 100
 l2 = 0.000001
 key, key_r = jax.random.split(key)
 
