@@ -54,21 +54,21 @@ class Spin_2_twirling(qml.operation.Operation):
                     Gate += operator_1[0] @ operator_2[0] + operator_1[1] @ operator_2[1] + operator_1[2] @ operator_2[2]
         eigenvals, U = eigh(Gate)
         
-        # max_eigenval = jnp.max(jnp.abs(eigenvals))
-        # normalized_eigenvals = eigenvals / max_eigenval
+        max_eigenval = jnp.max(jnp.abs(eigenvals))
+        normalized_eigenvals = eigenvals / max_eigenval
         
-        # normalized_eigenvals = jnp.where(
-        #     jnp.abs(normalized_eigenvals) < 1e-13,
-        #     0.0,
-        #     normalized_eigenvals
-        # )
+        normalized_eigenvals = jnp.where(
+            jnp.abs(normalized_eigenvals) < 1e-13,
+            0.0,
+            normalized_eigenvals
+        )
         # normalized_eigenvals = normalized_eigenvals * (10 ** 14)
         
         # jax.debug.print("Spin_2 normalized eigenvals: {}", normalized_eigenvals)
 
         return [
             qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
-            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
+            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * normalized_eigenvals), wires=range(num_qubit)),
             qml.QubitUnitary(U, wires=range(num_qubit))
         ]
 
@@ -146,19 +146,19 @@ class Spin_3_twirling(qml.operation.Operation):
     
         eigenvals, U = eigh(Gate)
         
-        # max_eigenval = jnp.max(jnp.abs(eigenvals))
-        # normalized_eigenvals = eigenvals / max_eigenval
+        max_eigenval = jnp.max(jnp.abs(eigenvals))
+        normalized_eigenvals = eigenvals / max_eigenval
         
-        # normalized_eigenvals = jnp.where(
-        #     jnp.abs(normalized_eigenvals) < 1e-13,
-        #     0.0,
-        #     normalized_eigenvals
-        # )
+        normalized_eigenvals = jnp.where(
+            jnp.abs(normalized_eigenvals) < 1e-13,
+            0.0,
+            normalized_eigenvals
+        )
         
         # jax.debug.print("Spin_3 normalized eigenvals: {}", normalized_eigenvals)
         
         return [
             qml.QubitUnitary(U.conj().T, wires=range(num_qubit)),
-            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * eigenvals), wires=range(num_qubit)),
+            qml.DiagonalQubitUnitary(jnp.exp(1j * theta * normalized_eigenvals), wires=range(num_qubit)),
             qml.QubitUnitary(U, wires=range(num_qubit))
         ]
