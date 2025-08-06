@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from gates import create_singlet
-from gates_twirling import Spin_2_twirling, Spin_3_twirling
+from gates_twirling_normalization import Spin_2_twirling, Spin_3_twirling
 import math
 import pennylane.numpy as pnp
 from flax import linen as nn
@@ -109,7 +109,7 @@ def create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta,
         k = 0
         for i in range(num_reupload):
             data = data_pt[:,i,:,:]
-            encode(data / Theta, num_qubit)  # ✅ num_qubit 매개변수 전달
+            encode(data / Theta, num_qubit) 
 
             for l in range(num_blocks_reupload):
                 Spin_2_twirling(params["q"][k], wires = range(num_qubit))
@@ -236,7 +236,7 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
 
 
 
-num_qubit = 8
+num_qubit = 6
 num_reupload = 1
 gate_type = "u2"
 test_learning_rate = 0.003
@@ -245,17 +245,17 @@ init_scale = 0.03
 dev = qml.device("default.qubit", wires = num_qubit)
 # dataset = np.load(f'dataset_{num_qubit}_{num_reupload}.npz')
 dataset = np.load(f'dataset_{int(num_qubit/2)}_{num_reupload}.npz')
-# dataset = np.load(f'modelnet40_2classes_{num_qubit}_{num_reupload}_fps_train960_test40.npz')
+# dataset = np.load(f'modelnet40_2classes_{int(num_qubit/2)}_{num_reupload}_fps_train960_test40_new.npz')
 
 print(get_Theta(dataset))
-Theta = 20
-epochs = 4
-l2 = 0.00001
+Theta = 18
+epochs = 100
+l2 = 0.000001
 key, key_r = jax.random.split(key)
 
-def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale):  # ✅ 함수 시그니처 정리
+def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale):  
     print(f'qubits = {num_qubit}, gate_type = {gate_type}, test_learning_rate = {test_learning_rate}, num_blocks_reupload = {num_blocks_reupload}, init_scale= {init_scale}, num_reupload = {num_reupload}, Theta = {Theta}, data = {dataset}')
-    train(gate_type, dataset, 32, Theta, epochs, key_r, init_scale, num_blocks_reupload, num_qubit, num_reupload, learning_rate = test_learning_rate)  # ✅ 모든 필요한 매개변수 전달
+    train(gate_type, dataset, 32, Theta, epochs, key_r, init_scale, num_blocks_reupload, num_qubit, num_reupload, learning_rate = test_learning_rate)  
 
 result(gate_type, test_learning_rate, num_blocks_reupload, init_scale)
 
