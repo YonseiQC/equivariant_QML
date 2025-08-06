@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 import optax
 from gates import create_singlet
-from gates_twirling_normalization import Spin_2_twirling, Spin_3_twirling
+from gates_twirling import Spin_2_twirling, Spin_3_twirling
 import math
 import pennylane.numpy as pnp
 from flax import linen as nn
