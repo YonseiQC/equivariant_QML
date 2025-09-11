@@ -13,7 +13,7 @@ from flax import linen as nn
 import matplotlib.pyplot as plt
 from scipy.stats import special_ortho_group
 
-scipy_rng = np.random.RandomState(1556)
+scipy_rng = np.random.RandomState(1557)
 # jax.config.update("jax_default_matmul_precision", "highest")
 np.random.seed(1557)
 jax.config.update("jax_enable_x64", True)
@@ -28,11 +28,9 @@ def get_Theta(point):
     return Theta
 
 def random_3d_rotation():
-    """수학적으로 올바른 3D 랜덤 회전 (scipy 사용)"""
     return special_ortho_group.rvs(3, random_state=scipy_rng)
 
 def apply_3d_rotation(points):
-    """단일 샘플에 대한 3D 랜덤 회전 (scipy special_ortho_group 사용)"""
     rotation_matrix = random_3d_rotation()
     rotation_matrix_jax = jnp.array(rotation_matrix)
     return jnp.dot(points, rotation_matrix_jax.T)
@@ -41,15 +39,20 @@ def add_jitter(points, key, sigma):
     noise = jax.random.normal(key, points.shape) * sigma
     return points + noise
 
+def apply_permutation(points):
+    num_points = points.shape[0]
+    perm_indices = scipy_rng.permutation(num_points)
+    return points[perm_indices]
+
 def apply_data_augmentation(points, key, is_training=True):
     if not is_training:
         return points
     
     key1, key2 = jax.random.split(key)
-    # 🔥 scipy 3D rotation으로 변경
-    augmented_points = apply_3d_rotation(points)
-    augmented_points = add_jitter(augmented_points, key2, sigma)
-    
+    augmented_points = add_jitter(points, key2, sigma)
+    augmented_points = apply_3d_rotation(augmented_points)
+    augmented_points = apply_permutation(augmented_points)
+
     return augmented_points
 
 def augment_batch(batch_points, key, is_training=True):
@@ -66,9 +69,10 @@ class MyNN(nn.Module):
     @nn.compact
     def __call__(self, x):
         x = jnp.expand_dims(x, axis=-1)
-        x = nn.Dense(features=6)(x)  
         x = nn.Dense(features=6)(x) 
-        x = nn.Dense(features=6)(x)
+        x = nn.tanh(x)
+        x = nn.Dense(features=6)(x) 
+        x = nn.tanh(x)
 
         # 기존 pooling (모두 permutation invariant)
         mean_pool = jnp.mean(x, axis=1)
@@ -76,194 +80,16 @@ class MyNN(nn.Module):
         min_pool = jnp.min(x, axis=1)
         std_pool = jnp.std(x, axis=1)
         sum_pool = jnp.sum(x, axis=1)
-
-        # 기본 통계 (모두 permutation invariant)
-        median_pool = jnp.median(x, axis=1)
         var_pool = jnp.var(x, axis=1)
-        range_pool = jnp.max(x, axis=1) - jnp.min(x, axis=1)
-
-        # Percentile 기반 (모두 permutation invariant)
-        p10_pool = jnp.percentile(x, 10, axis=1)
-        p25_pool = jnp.percentile(x, 25, axis=1)
-        p75_pool = jnp.percentile(x, 75, axis=1)
-        p90_pool = jnp.percentile(x, 90, axis=1)
-
-        # 절댓값 기반 (모두 permutation invariant)
-        abs_mean_pool = jnp.mean(jnp.abs(x), axis=1)
-        abs_max_pool = jnp.max(jnp.abs(x), axis=1)
-        abs_sum_pool = jnp.sum(jnp.abs(x), axis=1)
-
-        # 제곱 기반 (모두 permutation invariant)
-        squared_mean_pool = jnp.mean(jnp.square(x), axis=1)
-        l2_norm_pool = jnp.sqrt(jnp.sum(jnp.square(x), axis=1))
-
-        # 고차 모멘트 (모두 permutation invariant)
-        def compute_skewness(data):
-            mean_x = jnp.mean(data, axis=1, keepdims=True)
-            std_x = jnp.std(data, axis=1, keepdims=True)
-            skew = jnp.mean(((data - mean_x) / (std_x + 1e-8)) ** 3, axis=1)
-            return skew
-
-        def compute_kurtosis(data):
-            mean_x = jnp.mean(data, axis=1, keepdims=True)
-            std_x = jnp.std(data, axis=1, keepdims=True)
-            kurt = jnp.mean(((data - mean_x) / (std_x + 1e-8)) ** 4, axis=1) - 3
-            return kurt
-
-        def interaction_dominance(x):
-            """가장 강한 상호작용이 얼마나 지배적인가 (permutation invariant)"""
-            x_abs = jnp.abs(x)
-            max_interaction = jnp.max(x_abs, axis=1)
-            mean_interaction = jnp.mean(x_abs, axis=1)
-            dominance = max_interaction / (mean_interaction + 1e-8)
-            return dominance
-        
-        def ferro_antiferro_balance(x):
-            """Ferromagnetic vs Antiferromagnetic 상호작용 균형 (permutation invariant)"""
-            positive_strength = jnp.sum(jnp.where(x > 0, x, 0), axis=1)
-            negative_strength = jnp.sum(jnp.where(x < 0, -x, 0), axis=1)
-            total_strength = positive_strength + negative_strength
-            balance = jnp.abs(positive_strength - negative_strength) / (total_strength + 1e-8)
-            return balance
-        
-        def interaction_entropy(x):
-            """상호작용의 정보 엔트로피 (무질서도) (permutation invariant)"""
-            x_abs = jnp.abs(x) + 1e-8
-            x_norm = x_abs / jnp.sum(x_abs, axis=1, keepdims=True)
-            entropy = -jnp.sum(x_norm * jnp.log(x_norm + 1e-8), axis=1)
-            return entropy
-
-        def interaction_hierarchy(x):
-            """상호작용의 계층적 구조 강도 (permutation invariant)"""
-            x_sorted = jnp.sort(jnp.abs(x), axis=1)[:, ::-1]  # 내림차순
-            ratios = x_sorted[:, :-1] / (x_sorted[:, 1:] + 1e-8)
-            hierarchy_strength = jnp.mean(ratios, axis=1)
-            return hierarchy_strength
-
-        def effective_interaction_count(x):
-            """실제로 의미있는 상호작용 개수 (permutation invariant)"""
-            x_abs = jnp.abs(x)
-            threshold = 0.1 * jnp.max(x_abs, axis=1, keepdims=True)
-            effective_count = jnp.sum(x_abs > threshold, axis=1)
-            return effective_count.astype(float)
-        
-        def interaction_coherence(x):
-            """모든 상호작용이 같은 방향성을 갖는가 (permutation invariant)"""
-            signs = jnp.sign(x)
-            positive_ratio = jnp.mean(signs > 0, axis=1)
-            negative_ratio = jnp.mean(signs < 0, axis=1)
-            coherence = jnp.maximum(positive_ratio, negative_ratio)
-            return coherence
-
-        def participation_ratio(x):
-            """얼마나 많은 mode가 활성화되어 있는가 (permutation invariant)"""
-            x_squared = jnp.square(x)
-            sum_squared = jnp.sum(x_squared, axis=1, keepdims=True)
-            normalized = x_squared / (sum_squared + 1e-8)
-            pr = 1.0 / jnp.sum(jnp.square(normalized), axis=1)
-            return pr
-
-        def spectral_gap(x):
-            """가장 큰 두 상호작용 간의 간격 (permutation invariant)"""
-            x_sorted = jnp.sort(jnp.abs(x), axis=1)[:, ::-1]
-            gap = x_sorted[:, 0] - x_sorted[:, 1]
-            return gap
-
-        def correlation_length_proxy(x):
-            """Spin Correlation Length (modified to be permutation invariant)"""
-            # Use variance-based correlation measure instead of spatial correlation
-            x_mean = jnp.mean(x, axis=1, keepdims=True)
-            x_centered = x - x_mean
-            correlation_strength = jnp.var(x_centered, axis=1)
-            correlation_length = 1.0 / (jnp.abs(jnp.log(correlation_strength + 1e-8)) + 1e-8)
-            return correlation_length
-
-        def frustration_curvature_proxy(x):
-            """Magnetic Frustration Index (permutation invariant)"""
-            positive_interactions = jnp.sum(jnp.where(x > 0, x, 0), axis=1)
-            negative_interactions = jnp.sum(jnp.where(x < 0, -x, 0), axis=1)
-            total = positive_interactions + negative_interactions
-            
-            # Frustration peaks when positive and negative are balanced
-            frustration = 4 * positive_interactions * negative_interactions / ((total**2) + 1e-8)
-            return frustration
-
-        def susceptibility_proxy(x):
-            """Critical Susceptibility (permutation invariant)"""
-            base_susceptibility = jnp.var(x, axis=1)
-            return base_susceptibility
-
-        def topological_complexity(x):
-            """Topological complexity (modified to be permutation invariant)"""
-            # Use magnitude and phase diversity instead of winding
-            x_complex = x + 1j * jnp.roll(x, 1, axis=1)
-            magnitude_var = jnp.var(jnp.abs(x_complex), axis=1)
-            phase_var = jnp.var(jnp.angle(x_complex), axis=1)
-            complexity = magnitude_var + phase_var
-            return complexity
-        
-        skewness_pool = compute_skewness(x)
-        kurtosis_pool = compute_kurtosis(x)
-        dominance_pool = interaction_dominance(x)
-        balance_pool = ferro_antiferro_balance(x)
-        entropy_pool = interaction_entropy(x)
-        hierarchy_pool = interaction_hierarchy(x)
-        effective_count_pool = effective_interaction_count(x)
-        coherence_pool = interaction_coherence(x)
-        participation_pool = participation_ratio(x)
-        spectral_gap_pool = spectral_gap(x)
-
-        correlation_length_pool = correlation_length_proxy(x)
-        frustration_pool = frustration_curvature_proxy(x)
-        susceptibility_pool = susceptibility_proxy(x)
-        topological_pool = topological_complexity(x)
-
-        # Attention pooling (permutation invariant)
-        attention_features = nn.Dense(32)(x)
-        attention_features = nn.relu(attention_features)
-        attention_logits = nn.Dense(1)(attention_features)
-        attention_weights = nn.softmax(attention_logits, axis=1)
-        attention_pool = jnp.sum(x * attention_weights, axis=1)
-
-        # Feature attention
-        pooling_stack = jnp.stack([
-            mean_pool, max_pool, min_pool, std_pool, sum_pool, attention_pool
-        ], axis=1)
-        pooling_context = jnp.mean(pooling_stack, axis=1)  
-        pooling_attention_features = nn.Dense(32)(pooling_context)
-        pooling_attention_features = nn.relu(pooling_attention_features)
-        pooling_attention_logits = nn.Dense(6)(pooling_attention_features)  # 6개 pooling 방법에 대한 가중치
-        pooling_attention_weights = nn.softmax(pooling_attention_logits, axis=-1)  # (batch_size, 6)
-        pooling_weights_expanded = jnp.expand_dims(pooling_attention_weights, axis=-1)  # (batch_size, 6, 1)
-        attention_pool_2 = jnp.sum(pooling_stack * pooling_weights_expanded, axis=1)
-
-        # 모든 pooling 결합 
+       
         x = jnp.concatenate([
-            mean_pool, max_pool, min_pool, sum_pool, std_pool, var_pool
-            # attekntion_pool,
-            # attention_pool_2,
-            # median_pool, range_pool
-            # p10_pool, p90_pool,
-            # p25_pool, p75_pool, 
-            # abs_mean_pool, abs_max_pool, abs_sum_pool, 
-            # squared_mean_pool, l2_norm_pool,
-            # skewness_pool, kurtosis_pool
-            # dominance_pool, balance_pool,
-            # entropy_pool, hierarchy_pool,
-            # effective_count_pool, coherence_pool, 
-            # participation_pool, spectral_gap_pool,
-            # correlation_length_pool, 
-            # frustration_pool,                 
-            # susceptibility_pool,               
-            # topological_pool,                 
+            mean_pool, max_pool, min_pool, sum_pool, std_pool, var_pool               
         ], axis=-1)
         
-        x = nn.Dense(features=6)(x) 
-        x = nn.relu(x)
-        x = nn.Dense(features=6)(x) 
-        x = nn.relu(x)
-        x = nn.Dense(features=6)(x) 
-        x = nn.relu(x)
+        x = nn.Dense(features=36)(x) 
+        x = nn.tanh(x)
+        x = nn.Dense(features=36)(x) 
+        x = nn.tanh(x)
         x = nn.Dense(features=num_classes)(x)  
         
         return x
@@ -611,11 +437,11 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
         print(f"Final Total Gradient Norm: {total_grad_norms[-1]:.1e}")
 
 
-num_qubit = 8
+num_qubit = 14
 num_reupload = 1
 gate_type = "u2"
 test_learning_rate = 0.001
-num_blocks_reupload = 10
+num_blocks_reupload = 12
 init_scale = 0.02
 dev = qml.device("default.qubit", wires = num_qubit)
 point_class_train = 960
@@ -623,7 +449,6 @@ point_class_test = 40
 sigma = 0.02
 # sigma = 0
 
-# Theta = 1.7
 Theta = 1.7                                     
 use_augmentation = True
 # dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train{point_class_train}_test{point_class_test}.npz')
@@ -639,7 +464,7 @@ dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_tr
 print(get_Theta(dataset))
 test_dataset_y = dataset['test_dataset_y']
 num_classes = len(np.unique(test_dataset_y))
-epochs = 500
+epochs = 800
 l2 = 0.0000001
 key, key_r = jax.random.split(key)
 
@@ -658,4 +483,15 @@ result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augme
 # # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64, attention = 32-> modelnet(5classes) -> 74%(attention 추가) - m2
 # # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64, attention = 32-> modelnet(5classes) -> 72%(attention 추가) (var추가) - m4 (no conda)
 # # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64, attention = 32-> modelnet(5classes) -> 75%(attention 추가) (var추가) -m2
-# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64, attention = 32-> modelnet(5classes) -> 73.5%(attention 추가) (var추가) -m4 (no attention)
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64-> modelnet(5classes) -> 73.5% (var추가) -m4 
+
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 10, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 6, first = 3 * no relu, second = 3 * relu-> modelnet(5classes) -> 70% (var추가) -m4
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 10, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 6, first = 3 * tanh, second = 3 * tanh-> modelnet(5classes) -> 70.5% (var추가) -m4
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 10, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 6, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 71.5% (var추가) -m4
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 6, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 71.5% (var추가) -m4
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 64, layer_2 = 64, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 76% (var추가) -m4
+# # memory : qubits = 8, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 36, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 73% (var추가) -m4
+
+# # memory : qubits = 10, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 10, layer_2 = 10, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 76% (var추가) -m4
+# # memory : qubits = 10, gate_type = u2, test_learning_rate = 0.001, num_blocks_reupload = 12, init_scale= 0.02, num_reupload = 1, Theta = 1.7, l2 = 1e-6, layer_1 = 6, layer_2 = 36, first = 2 * tanh, second = 2 * tanh-> modelnet(5classes) -> 76.5% (var추가) -m4
+
