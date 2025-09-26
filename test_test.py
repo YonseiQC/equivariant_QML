@@ -233,7 +233,6 @@ def train(gate_type, dataset, minibatch_size, Theta, epochs, key, init_scale, nu
         params = {"q" : params_q, "c" : params_c}
 
         twirling_circuit = qml.QNode(create_twirling_circuit(num_qubit, num_blocks_reupload, num_reupload, Theta, ham), device = dev, interface='jax', diff_method='adjoint')  
-        twirling_circuit = jax.jit(twirling_circuit)
 
         def loss_fn(params, mini_batch_x, mini_batch_y, l2):
             expval_ham = (jnp.array(twirling_circuit(params, mini_batch_x))).T
