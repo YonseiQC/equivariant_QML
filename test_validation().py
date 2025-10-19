@@ -104,9 +104,9 @@ class MyNN(nn.Module):
 
         x = jnp.concatenate([mean_pool, max_pool, min_pool, sum_pool, std_pool, var_pool], axis=-1)
 
-        x = nn.Dense(features=4)(x)
+        x = nn.Dense(features=24)(x)
         x = nn.tanh(x)
-        x = nn.Dense(features=4)(x)
+        x = nn.Dense(features=24)(x)
         x = nn.tanh(x)
         x = nn.Dense(features=num_classes)(x)  
         return x
