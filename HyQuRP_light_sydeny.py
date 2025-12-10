@@ -286,7 +286,7 @@ learning_rate = 0.001
 
 dev = qml.device("default.qubit", wires=num_qubit)
 
-for _base_seed in [831, 121, 2023, 2024, 2025, 2026]:
+for _base_seed in [1557, 831, 121, 2023, 2024, 2025, 2026]:
     dataset_tag = 'SUO'
     npz_name = f'SUO_3classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz'
     data = np.load(npz_name)
