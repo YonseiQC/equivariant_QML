@@ -449,8 +449,7 @@ def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_a
 
 
 a = result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation)
-results.append(a)
-
+print(a)
 
 
 dataset_tag = 'shapenet' ; dataset = np.load(f'shapenet_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz')
