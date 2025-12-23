@@ -14,9 +14,10 @@ from flax import linen as nn
 from scipy.stats import special_ortho_group
 import hashlib  # [RNG] 추가
 import sys
+import datetime
 
 # --------------------------- Seed & JAX opts ---------------------------
-jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", False)
 
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
@@ -322,6 +323,8 @@ def train(gate_type, minibatch_size, Theta, epochs, key, init_scale,
             val_acc = accuracy(params, val_dataset_x, val_dataset_y)
             val_loss_lst.append(val_loss); val_acc_lst.append(val_acc)
 
+            now = datetime.datetime.now()
+            print(f"Iteration done at {now}")
             print(f"Val Loss: {val_loss}")
             print(f"Val Accuracy: {val_acc}")
             print(f"Epoch Avg Gradients - Q: {avg_q:.1e}, C: {avg_c:.1e}, Total: {avg_tot:.1e}")
