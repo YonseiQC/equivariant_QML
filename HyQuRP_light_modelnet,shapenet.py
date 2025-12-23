@@ -2,8 +2,6 @@
 # -*- coding: utf-8 -*-
 
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.metrics import confusion_matrix, classification_report
 import pennylane as qml
 import jax
@@ -15,6 +13,7 @@ import pennylane.numpy as pnp
 from flax import linen as nn
 from scipy.stats import special_ortho_group
 import hashlib  # [RNG] 추가
+import sys
 
 # --------------------------- Seed & JAX opts ---------------------------
 jax.config.update("jax_enable_x64", True)
@@ -142,6 +141,7 @@ def calculate_final_metrics(y_true, y_pred, num_classes):
     overall_accuracy = np.trace(cm) / np.sum(cm)
     return cm, class_accuracies, overall_accuracy
 
+"""
 def plot_confusion_matrix(cm, class_names=None, title='Confusion Matrix'):
     plt.figure(figsize=(8, 6))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues',
@@ -151,7 +151,8 @@ def plot_confusion_matrix(cm, class_names=None, title='Confusion Matrix'):
     plt.xlabel('Predicted')
     plt.ylabel('True')
     plt.show()
-
+"""
+    
 def analyze_gradient_norms(grad):
     q_individual_grads = grad["q"]
     q_grad_norm = jnp.linalg.norm(grad["q"])
@@ -401,65 +402,64 @@ num_classes = 5
 epochs = 1000
 l2 = 0
 
-for _base_seed in [1557, 831, 121, 2023, 2024, 2025, 2026]:
+_base_seed = int(sys.argv[1])
+print(f"Using seed={_base_seed}")
 
-    dataset_tag = 'modelnet'  ; dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz')
-    print(get_Theta(dataset))
-    print(_base_seed)
+dataset_tag = 'modelnet'  ; dataset = np.load(f'modelnet40_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz')
+print(get_Theta(dataset))
+print(_base_seed)
 
-    def ensure_reupload_dim(x):
-        if x.ndim == 3:
-            return x.reshape(x.shape[0], num_reupload, -1, 3)
-        elif x.ndim == 4:
-            return x
-        else:
-            raise ValueError(f"Unexpected shape for point cloud: {x.shape}")
+def ensure_reupload_dim(x):
+    if x.ndim == 3:
+        return x.reshape(x.shape[0], num_reupload, -1, 3)
+    elif x.ndim == 4:
+        return x
+    else:
+        raise ValueError(f"Unexpected shape for point cloud: {x.shape}")
 
-    train_dataset_x = ensure_reupload_dim(dataset['train_dataset_x'])  
-    train_dataset_y = dataset['train_dataset_y']                       
-    val_dataset_x   = ensure_reupload_dim(dataset['val_dataset_x'])   
-    val_dataset_y   = dataset['val_dataset_y']                        
-    test_dataset_x  = ensure_reupload_dim(dataset['test_dataset_x'])   
-    test_dataset_y  = dataset['test_dataset_y']                       
-
-
-
-    def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation):
-        global scipy_rng, key, key_r, _global_subseed, _num_point
-
-        _num_point = int(num_qubit / 2)
-
-        _rng_pack = make_rng_pack(_base_seed, _num_point, dataset_tag)
-        scipy_rng       = _rng_pack['scipy_rs']   
-        key             = _rng_pack['base_key']   
-        _global_subseed = _rng_pack['subseed']   
-        key_r = key                               
-
-        print(dataset)
-        a = train(gate_type, 35, Theta, epochs, key_r, init_scale,
-            num_blocks_reupload, num_qubit, num_reupload, use_augmentation,
-            learning_rate=test_learning_rate)
-        
-        return a
-
-
-    a = result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation)
-    results.append(a)
+train_dataset_x = ensure_reupload_dim(dataset['train_dataset_x'])  
+train_dataset_y = dataset['train_dataset_y']                       
+val_dataset_x   = ensure_reupload_dim(dataset['val_dataset_x'])   
+val_dataset_y   = dataset['val_dataset_y']                        
+test_dataset_x  = ensure_reupload_dim(dataset['test_dataset_x'])   
+test_dataset_y  = dataset['test_dataset_y']                       
 
 
 
-    dataset_tag = 'shapenet' ; dataset = np.load(f'shapenet_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz')
-    print(get_Theta(dataset))
-    print(_base_seed)
+def result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation):
+    global scipy_rng, key, key_r, _global_subseed, _num_point
 
-    train_dataset_x = ensure_reupload_dim(dataset['train_dataset_x'])  
-    train_dataset_y = dataset['train_dataset_y']                       
-    val_dataset_x   = ensure_reupload_dim(dataset['val_dataset_x'])   
-    val_dataset_y   = dataset['val_dataset_y']                        
-    test_dataset_x  = ensure_reupload_dim(dataset['test_dataset_x'])   
-    test_dataset_y  = dataset['test_dataset_y']
+    _num_point = int(num_qubit / 2)
 
-    a = result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation)
-    results.append(a)
+    _rng_pack = make_rng_pack(_base_seed, _num_point, dataset_tag)
+    scipy_rng       = _rng_pack['scipy_rs']   
+    key             = _rng_pack['base_key']   
+    _global_subseed = _rng_pack['subseed']   
+    key_r = key                               
 
-print(results)
+    print(dataset)
+    a = train(gate_type, 35, Theta, epochs, key_r, init_scale,
+        num_blocks_reupload, num_qubit, num_reupload, use_augmentation,
+        learning_rate=test_learning_rate)
+    
+    return a
+
+
+a = result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation)
+results.append(a)
+
+
+
+dataset_tag = 'shapenet' ; dataset = np.load(f'shapenet_5classes_{int(num_qubit/2)}_{num_reupload}_fps_train700_val100_test200_new.npz')
+print(get_Theta(dataset))
+print(_base_seed)
+
+train_dataset_x = ensure_reupload_dim(dataset['train_dataset_x'])  
+train_dataset_y = dataset['train_dataset_y']                       
+val_dataset_x   = ensure_reupload_dim(dataset['val_dataset_x'])   
+val_dataset_y   = dataset['val_dataset_y']                        
+test_dataset_x  = ensure_reupload_dim(dataset['test_dataset_x'])   
+test_dataset_y  = dataset['test_dataset_y']
+
+a = result(gate_type, test_learning_rate, num_blocks_reupload, init_scale, use_augmentation)
+print(a)
