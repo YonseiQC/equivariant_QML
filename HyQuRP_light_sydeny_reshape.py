@@ -398,7 +398,7 @@ test_learning_rate = 0.001
 num_blocks_reupload = 12
 init_scale = 0.02
 dev = qml.device("default.qubit", wires=num_qubit)
-sigma = 0.02
+sigma = 0.01
 Theta = 1.7
 use_augmentation = True
 num_classes = 3
