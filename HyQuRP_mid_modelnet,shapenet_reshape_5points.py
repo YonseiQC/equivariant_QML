@@ -17,7 +17,7 @@ import sys
 import datetime
 
 # --------------------------- Seed & JAX opts ---------------------------
-jax.config.update("jax_enable_x64", False)
+jax.config.update("jax_enable_x64", True)
 
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
