@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 _pre = argparse.ArgumentParser(add_help=False)
 _pre.add_argument("seed", type=int)
@@ -459,7 +460,17 @@ def main():
         num_classes = 3
         npz_name = f"SUO_3classes_{num_points}_{num_reupload}_fps_train700_val100_test200_new.npz"
 
-    dataset = np.load(npz_name)
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
+
+    if dataset_tag == "modelnet":
+        dataset_path = REPO / "data" / "ModelNet" / npz_name
+    elif dataset_tag == "shapenet":
+        dataset_path = REPO / "data" / "ShapeNet" / npz_name
+    else:
+        dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
+
+    dataset = np.load(dataset_path)
 
     print(f"Using seed={base_seed}")
     print(f"dataset={dataset_tag}, variant={variant}, num_qubit={num_qubit}, num_points={num_points}, num_pairs={num_pairs}")

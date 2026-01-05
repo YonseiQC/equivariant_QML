@@ -1,3 +1,4 @@
+from pathlib import Path
 from scipy.linalg import eigh as scipy_eigh
 import pennylane as qml
 import jax.numpy as jnp
@@ -7,12 +8,15 @@ EIGEN_CACHE = {}
 
 def precompute_UDU_decomposition(num_qubit, num_perm):
 
-    filename_1 = f"perm_matrix_{num_qubit}_{num_perm}_plus_normalized.npy"
+    HERE = Path(__file__).resolve().parent
+    PERM_DIR = HERE / "PermMatrix"
+
+    filename_1 = PERM_DIR / f"perm_matrix_{num_qubit}_{num_perm}_plus_normalized.npy"
     matrix_1 = np.load(filename_1)
     Gate_1 = np.array(matrix_1, dtype=complex)
     eigenvals_1, U_1 = scipy_eigh(Gate_1)  
     
-    filename_2 = f"perm_matrix_{num_qubit}_{num_perm}_minus_normalized.npy"
+    filename_2 = PERM_DIR / f"perm_matrix_{num_qubit}_{num_perm}_minus_normalized.npy"
     matrix_2 = np.load(filename_2)
     Gate_2 = np.array(matrix_2, dtype=complex)
     eigenvals_2, U_2 = scipy_eigh(Gate_2) 
