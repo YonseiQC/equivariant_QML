@@ -1,1 +1,1 @@
-# equivariant_QML
+# HyQuRP
