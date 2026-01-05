@@ -190,58 +190,50 @@ class ResidualMLPBlock(nn.Module):
         return out
 
 
-class GAPooling(nn.Module):
-    def __init__(self, k):
+class GeometricAffine(nn.Module):
+    def __init__(self, d, eps=1e-5):
         super().__init__()
-        self.k = k
+        self.alpha = nn.Parameter(torch.ones(d))
+        self.beta = nn.Parameter(torch.zeros(d))
+        self.eps = eps
 
-    def forward(self, x, idx):
-        gathered = index_points(x, idx)
-        pooled = gathered.mean(dim=2)
-        return pooled
+    def forward(self, neigh, center):
+        offset = neigh - center.unsqueeze(2)
+        sigma = (offset ** 2).mean()
+        normed = offset / (sigma + self.eps)
+        return normed * self.alpha + self.beta
 
 
 class GAEncode(nn.Module):
     def __init__(self, in_c, k):
         super().__init__()
         self.k = k
-        self.fc = Linear1d(in_c, in_c, bias=False)
+        self.ga = GeometricAffine(in_c)
 
     def forward(self, xyz_B3N, feats_BNC):
         idx = knn(xyz_B3N, k=self.k)
-        pooled = GAPooling(self.k)(feats_BNC, idx)
-        out = self.fc(pooled)
-        return out
+        neigh = index_points(feats_BNC, idx)
+        gaed = self.ga(neigh, feats_BNC)
+        pooled = gaed.max(dim=2).values
+        return pooled
 
 
 class ContextFusion(nn.Module):
-    def __init__(self, in_c, act="relu", eps=1e-5):
+    def __init__(self, in_c, act="relu"):
         super().__init__()
-        self.in_c = in_c
-        self.eps = eps
-        self.gamma = nn.Parameter(torch.ones(1, 1, 1, 2 * in_c))
-        self.beta = nn.Parameter(torch.zeros(1, 1, 1, 2 * in_c))
-        self.align = Linear1d(2 * in_c, in_c, bias=False)
-        self.act = nn.ReLU(inplace=True) if act == "relu" else nn.GELU()
+        self.fc = Linear1d(in_c * 3, in_c, bias=False)
+        self.bn = BNAct1d(in_c, act=act)
 
-    def forward(self, x):
-        B, N, C = x.shape
-        if N <= 1:
-            return x
-
-        F_center = x.unsqueeze(2).expand(-1, -1, N, -1)
-        F_neighbors = x.unsqueeze(1).expand(-1, N, -1, -1)
-        diff = F_neighbors - F_center
-        var = diff.var(dim=2, unbiased=False, keepdim=True)
-        F_tilde = diff / torch.sqrt(var + self.eps)
-
-        Fc_K = torch.cat([F_tilde, F_center], dim=-1)
-        Fc_K = Fc_K * self.gamma + self.beta
-        weights = torch.softmax(Fc_K, dim=2)
-        Fc_C = (weights * Fc_K).sum(dim=2)
-
-        tokens = self.align(Fc_C)
-        return self.act(tokens)
+    def forward(self, feats_BNC):
+        B, N, C = feats_BNC.shape
+        g_max = feats_BNC.max(dim=1, keepdim=True).values
+        g_mean = feats_BNC.mean(dim=1, keepdim=True)
+        g_max = g_max.expand(B, N, C)
+        g_mean = g_mean.expand(B, N, C)
+        fused = torch.cat([feats_BNC, g_max, g_mean], dim=-1)
+        fused = self.fc(fused)
+        fused = self.bn(fused)
+        return fused
 
 
 class PointMLPStageSimpleLight(nn.Module):
