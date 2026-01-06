@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 import hashlib
 import random
 
@@ -112,16 +113,22 @@ def run_one_block(base_seed: int, points: int, dataset_tag: str, variant: str):
         for i in range(batch_points.shape[0]):
             aug_list.append(apply_data_augmentation(batch_points[i], is_training))
         return torch.stack(aug_list, dim=0)
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
 
     if dataset_tag == "modelnet":
-        data = np.load(f"modelnet40_5classes_{points}_1_fps_train700_val100_test200_new.npz")
+        npz_name = f"modelnet40_5classes_{points}_1_fps_train700_val100_test200_new.npz"
+        dataset_path = REPO / "data" / "ModelNet" / npz_name
     elif dataset_tag == "shapenet":
-        data = np.load(f"shapenet_5classes_{points}_1_fps_train700_val100_test200_new.npz")
+        npz_name = f"shapenet_5classes_{points}_1_fps_train700_val100_test200_new.npz"
+        dataset_path = REPO / "data" / "ShapeNet" / npz_name
     elif dataset_tag == "SUO":
-        data = np.load(f"SUO_3classes_{points}_1_fps_train700_val100_test200_new.npz")
+        npz_name = f"SUO_3classes_{points}_1_fps_train700_val100_test200_new.npz"
+        dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
     else:
         raise ValueError("dataset_tag must be 'modelnet', 'shapenet', or 'SUO'")
 
+    data = np.load(dataset_path)
     train_x = data["train_dataset_x"].reshape(-1, points, coords).astype(np.float32)
     train_y = data["train_dataset_y"]
     val_x = data["val_dataset_x"].reshape(-1, points, coords).astype(np.float32)
