@@ -155,15 +155,6 @@ The generated `.npz` files will be saved into the corresponding dataset folder:
 HyQuRP uses precomputed (normalized) permutation matrices stored in `HyQuRP/PermMatrix/`.
 Generate them by running `HyQuRP/create_perm_matrix_normalized.py` once per `num_qubit`.
 
-### Output location
-
-Running the script will create / update:
-
-- `HyQuRP/PermMatrix/perm_matrix_{num_qubit}_{num_perm}_plus_normalized.npy`
-- `HyQuRP/PermMatrix/perm_matrix_{num_qubit}_{num_perm}_minus_normalized.npy`
-
-where `num_perm` ranges from 2 to `(num_qubit // 2)`.
-
 ### Generate matrices
 
 From the repository root:
@@ -178,9 +169,53 @@ python HyQuRP/create_perm_matrix_normalized.py --num_qubit 10
 ```
 >Note: the matrices have shape `(2**num_qubit, 2**num_qubit)`, so large num_qubit can be very memory/time intensive.
 
+Running the script will create / update:
+
+- `HyQuRP/PermMatrix/perm_matrix_{num_qubit}_{num_perm}_plus_normalized.npy`
+- `HyQuRP/PermMatrix/perm_matrix_{num_qubit}_{num_perm}_minus_normalized.npy`
+
+where `num_perm` ranges from 2 to `(num_qubit // 2)`.
+
 ---
 
 ## Run HyQuRP & baselines
+
+> Run commands from the repository root.
+> Make sure the corresponding `.npz` file already exists under:
+> `data/ModelNet/`, `data/ShapeNet/`, or `data/Sydney_Urban_Objects/`.
+
+
+### Run HyQuRP
+
+```bash
+python HyQuRP/HyQuRP.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT>
+```
+
+> Make sure the precomputed (normalized) permutation matrices are available in `HyQuRP/PermMatrix/`.
+
+- `<DATASET>`: `modelnet`, `shapenet`, or `suo`
+- `<VARIANT>`: `light` or `mid`
+- `num_points = num_qubit // 2` (so `NUM_QUBIT` must be even)
+
+### Run baselines
+
+All baseline scripts live under `baselines/`. Use the same core flags:
+
+```bash
+python baselines/<BASELINE_MODEL>.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT> [--extra_args ...]
+```
+
+- `<BASELINE_MODEL>`: the baseline script name (e.g., `DGCNN`, `PointNet`, ...)
+- Some baselines may require extra arguments (e.g., `--k <K>` for kNN-based models).
+
+#### Example: DGCNN
+
+```bash
+python baselines/DGCNN.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT> --k <K>
+```
+
+Each script prints validation progress and reports the final **Test Overall Accuracy** at the end.
+
 
 ---
 
