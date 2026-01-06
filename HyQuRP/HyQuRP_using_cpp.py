@@ -1,6 +1,8 @@
 import os
 import argparse
 from pathlib import Path
+import hyqurp_cpp
+hyqurp_cpp.kokkos_initialize({})
 from hyqurp_cpp import QRPCircuitC128, QRPCircuitC64
 
 _pre = argparse.ArgumentParser(add_help=False)
@@ -18,7 +20,7 @@ if _enable_x64:
 else:
     QRPCircuit = QRPCircuitC64
 
-os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = 0.25
+os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = "0.25"
 
 import jax
 jax.config.update("jax_enable_x64", _enable_x64)
@@ -174,11 +176,10 @@ def calculate_final_metrics(y_true, y_pred, num_classes_):
     return cm, class_accuracies, overall_accuracy
 
 def analyze_gradient_norms(grad):
-    q_grad_norm = jnp.linalg.norm(grad["q"])
-    c_grad_leaves = tree_leaves(grad["c"])
-    c_grad_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
-    total_grad_norm = jnp.sqrt(jnp.sum(jnp.square(grad["q"])) + sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
-    return q_grad_norm, c_grad_norm, total_grad_norm
+    q_grad_sqr_sum = float(jnp.sum(jnp.square(grad["q"])))
+    c_grad_leaves = jax.tree.leaves(grad["c"])
+    c_grad_sqr_sum = sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves)
+    return jnp.sqrt(q_grad_sqr_sum), jnp.sqrt(c_grad_sqr_sum), jnp.sqrt(q_grad_sqr_sum + c_grad_sqr_sum)
 
 def ensure_reupload_dim(x, num_reupload):
     if x.ndim == 3:
@@ -234,7 +235,7 @@ def train(
     init_u2 = init_scale * math.pi / (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * num_reupload))
     qkey = jax.random.PRNGKey(make_subseed(_global_subseed, "init_q"))
     params_q = init_u2 * jax.random.uniform(
-        qkey, (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * num_reupload),)
+        qkey, shape = (num_blocks_reupload, (int(num_qubit_ / 2) - 1), 2)
     )
 
     dummy_input = jnp.ones((1, 2 * num_pairs))
@@ -245,29 +246,42 @@ def train(
 
     params = {"q": params_q, "c": params_c}
     
-    _cpp_circuit = QRPCircuit(num_qubits // 2)
+    _cpp_circuit = QRPCircuit(num_qubit_ // 2)
+    cpu_device = jax.devices("cpu")[0]
+
+    if jax.devices('gpu'):
+        gpu_device = jax.devices('gpu')[0]
+    else:
+        gpu_device = jax.devices('cpu')[0]
 
     def circuit(points):
+        points_cpu = jax.device_put(points, device=cpu_device)
+
         @jax.custom_vjp
         def f(params):
-            returncpp_circ.f(points, params)
+            params_cpu = jax.device_put(params, device=cpu_device)
+            return jax.device_put(_cpp_circuit.f(points_cpu, params_cpu), gpu_device)
 
         def f_fwd(params):
-            val, states = circ.forward(points, params)
-            return val, (states, params)
+            params_cpu = jax.device_put(params, device=cpu_device)
+            val, states = _cpp_circuit.forward(points_cpu, params_cpu)
+            return jax.device_put(val, gpu_device), (states, params_cpu)
 
         def f_bwd(res, g):
-            states, params = res
-            vjp = circ.vjp(params, states, g)
-            return (vjp,)
+            states, params_cpu = res
+            g_cpu = jax.device_put(g, device=cpu_device)
+            vjp = _cpp_circuit.vjp(params_cpu, states, g_cpu)
+            return (jax.device_put(vjp, gpu_device),)
 
         f.defvjp(f_fwd, f_bwd)
         return f
+
+    NN_jit = jax.jit(NN_apply)
     
     def forward_expval(params_, x_batch):
         qnode = circuit(x_batch)
         expval_ham = qnode(params_["q"])
-        logits = NN_apply(params_["c"], expval_ham)
+        logits = NN_jit(params_["c"], expval_ham)
         return logits
 
     def loss_fn(params_, x_batch, y_batch):
@@ -303,7 +317,7 @@ def train(
             current_train_x = xs
 
         num_batches = batch_size // minibatch_size
-        current_train_x = current_train_x.reshape(num_batches, minibatch_size, num_reupload, -1, 3)
+        current_train_x = current_train_x.reshape(num_batches, minibatch_size, -1, 3)
         train_y_batched = ys.reshape(num_batches, minibatch_size)
 
         epoch_train_loss = 0.0
@@ -312,7 +326,7 @@ def train(
         epoch_total_grad_norms = []
 
         for i in range(num_batches):
-            loss, grad = jax.value_and_grad(loss_fn, argnums=0)(params, current_train_x[i], train_y_batched[i])
+            loss, grad = jax.value_and_grad(loss_fn)(params, current_train_x[i], train_y_batched[i])
 
             qn, cn, tn = analyze_gradient_norms(grad)
             epoch_q_grad_norms.append(qn)
@@ -425,9 +439,9 @@ def main():
 
     train_dataset_x = ensure_reupload_dim(dataset["train_dataset_x"], num_reupload)
     train_dataset_y = dataset["train_dataset_y"]
-    val_dataset_x = ensure_reupload_dim(dataset["val_dataset_x"], num_reupload)
+    val_dataset_x = dataset["val_dataset_x"]
     val_dataset_y = dataset["val_dataset_y"]
-    test_dataset_x = ensure_reupload_dim(dataset["test_dataset_x"], num_reupload)
+    test_dataset_x = dataset["test_dataset_x"]
     test_dataset_y = dataset["test_dataset_y"]
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
