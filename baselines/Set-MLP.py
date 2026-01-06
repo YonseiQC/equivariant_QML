@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import jax
 
@@ -281,7 +282,18 @@ def main():
     dataset_tag, npz_name, num_classes, sigma = resolve_dataset(args.dataset, num_points)
 
     np.random.seed(base_seed)
-    dataset = np.load(npz_name)
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
+
+    tag = str(dataset_tag).lower()
+    if tag == "modelnet":
+        dataset_path = REPO / "data" / "ModelNet" / npz_name
+    elif tag == "shapenet":
+        dataset_path = REPO / "data" / "ShapeNet" / npz_name
+    else:
+        dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
+
+    dataset = np.load(dataset_path)
 
     print(f"Using seed={base_seed}")
     print(
@@ -312,3 +324,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
