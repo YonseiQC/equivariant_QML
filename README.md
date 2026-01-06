@@ -150,7 +150,7 @@ The generated `.npz` files will be saved into the corresponding dataset folder:
 
 ---
 
-## Make matrix
+## HyQuRP Matrices
 
 HyQuRP uses precomputed (normalized) permutation matrices stored in `HyQuRP/PermMatrix/`.
 Generate them by running `HyQuRP/create_perm_matrix_normalized.py` once per `num_qubit`.
