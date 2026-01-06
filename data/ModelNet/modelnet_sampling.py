@@ -4,14 +4,24 @@ import numpy as np
 import h5py
 from scipy.stats import special_ortho_group
 
+CLASS_LABELS = [5, 6, 10, 19, 32]
+TRAIN_PER_CLASS = 700
+VAL_PER_CLASS = 100
+TEST_PER_CLASS = 200
+SAMPLING = "fps"
+ROTATION = 1
+SEED = 1557
+NUM_REUPLOAD = 1
+H5_FOLDER_NAME = "modelnet40_ply_hdf5_2048"
+
 def discover_modelnet40_files(data_dir):
-    train_patterns = ["ply_data_train*.h5", "*train*.h5", "modelnet40_train*.h5"]
-    test_patterns  = ["ply_data_test*.h5",  "*test*.h5",  "modelnet40_test*.h5"]
+    train_patterns = ["ply_data_train*.h5", "*train*.h5", "modelnet40_train*.h5", "train*.h5"]
+    test_patterns  = ["ply_data_test*.h5",  "*test*.h5",  "modelnet40_test*.h5",  "test*.h5"]
     train_files, test_files = [], []
     for pat in train_patterns:
-        train_files += glob.glob(os.path.join(data_dir, pat))
+        train_files += glob.glob(os.path.join(str(data_dir), pat))
     for pat in test_patterns:
-        test_files  += glob.glob(os.path.join(data_dir, pat))
+        test_files  += glob.glob(os.path.join(str(data_dir), pat))
     train_files = sorted(set(train_files))
     test_files  = sorted(set(test_files))
     if not train_files or not test_files:
@@ -21,12 +31,12 @@ def discover_modelnet40_files(data_dir):
     return train_files, test_files
 
 def _read_one_h5(path):
-    with h5py.File(path, 'r') as f:
-        if 'data' not in f or 'label' not in f:
+    with h5py.File(path, "r") as f:
+        if "data" not in f or "label" not in f:
             raise KeyError(f"{path} missing 'data' or 'label'")
-        data  = f['data'][:]
-        label = f['label'][:].squeeze()
-        normal= f['normal'][:] if 'normal' in f else None
+        data = f["data"][:]
+        label = f["label"][:].squeeze()
+        normal = f["normal"][:] if "normal" in f else None
         return data, label.astype(np.int64), normal
 
 def load_pool(paths):
@@ -34,19 +44,22 @@ def load_pool(paths):
     for p in paths:
         X, y, N = _read_one_h5(p)
         print(f"[load] {os.path.basename(p)} -> X:{X.shape} y:{y.shape}" + (f" normal:{N.shape}" if N is not None else ""))
-        all_X.append(X); all_y.append(y)
-        if N is not None: all_N.append(N)
+        all_X.append(X)
+        all_y.append(y)
+        if N is not None:
+            all_N.append(N)
     X = np.concatenate(all_X, axis=0)
     y = np.concatenate(all_y, axis=0)
-    N = np.concatenate(all_N, axis=0) if len(all_N)==len(paths) else None
+    N = np.concatenate(all_N, axis=0) if len(all_N) == len(paths) else None
     return X, y, N
 
 def filter_and_relabel(X, y, N, class_labels):
     class_labels = list(class_labels)
     keep = np.isin(y, class_labels)
-    Xf = X[keep]; yf = y[keep]
+    Xf = X[keep]
+    yf = y[keep]
     Nf = N[keep] if N is not None else None
-    label_map = {orig:i for i,orig in enumerate(class_labels)}
+    label_map = {orig: i for i, orig in enumerate(class_labels)}
     ynew = np.array([label_map[int(t)] for t in yf], dtype=np.int64)
     print(f"[filter] kept {len(Xf)} objects across {len(class_labels)} classes; map={label_map}")
     return Xf, ynew, Nf, label_map
@@ -74,7 +87,8 @@ def farthest_point_sampling(points, k, candidate_idx=None, rng=None):
 
 def sample_points(object_points, m, method="fps", rng=None):
     N = object_points.shape[0]
-    if rng is None: rng = np.random.default_rng()
+    if rng is None:
+        rng = np.random.default_rng()
     if N < m:
         rep = (m + N - 1) // N
         idx = np.tile(np.arange(N), rep)[:m]
@@ -92,38 +106,36 @@ def split_train_val_by_objects(num_obj, train_needed, val_needed, rng):
     a = min(num_obj, train_needed)
     b = min(max(num_obj - a, 0), val_needed)
     train_idx = order[:a]
-    val_idx   = order[a:a+b]
+    val_idx = order[a:a + b]
     return train_idx, val_idx
 
-def run(
-    h5_dir,
-    out_dir,
-    class_labels,
-    points_per_sample=4,
-    num_reupload=1,
-    train_per_class=700,
-    val_per_class=100,
-    test_per_class=200,
-    sampling="fps",
-    rotation=0,
-    seed=42,
-):
-    out_dir = Path(__file__).resolve().parent
-    out_dir.mkdir(parents=True, exist_ok=True)
+def resolve_h5_dir(script_dir: Path):
+    cand = script_dir / H5_FOLDER_NAME
+    if cand.is_dir():
+        return cand
+    return script_dir
 
-    np.random.seed(seed)
-    rng = np.random.default_rng(seed)
+def run(points_per_sample: int):
+    script_dir = Path(__file__).resolve().parent
+    h5_dir = resolve_h5_dir(script_dir)
+
+    np.random.seed(SEED)
+    rng = np.random.default_rng(SEED)
 
     tr_files, te_files = discover_modelnet40_files(h5_dir)
     Xtr_all, ytr_all, _ = load_pool(tr_files)
     Xte_all, yte_all, _ = load_pool(te_files)
 
-    Xtr, ytr, _, _ = filter_and_relabel(Xtr_all, ytr_all, None, class_labels)
-    Xte, yte, _, _ = filter_and_relabel(Xte_all, yte_all, None, class_labels)
-    K = len(class_labels)
-    P_tr = Xtr.shape[1]; P_te = Xte.shape[1]
-    assert P_tr == P_te, "Train/Test points-per-object mismatch"
-    print(f"[info] points-per-object in H5: {P_tr}")
+    Xtr, ytr, _, label_map = filter_and_relabel(Xtr_all, ytr_all, None, CLASS_LABELS)
+    Xte, yte, _, _ = filter_and_relabel(Xte_all, yte_all, None, CLASS_LABELS)
+    K = len(CLASS_LABELS)
+
+    P_tr = Xtr.shape[1]
+    P_te = Xte.shape[1]
+    if P_tr != P_te:
+        raise ValueError("Train/Test points-per-object mismatch")
+    if points_per_sample > P_tr:
+        raise ValueError(f"num_points must be <= {P_tr}, got {points_per_sample}")
 
     cls_indices_tr = {c: np.where(ytr == c)[0] for c in np.unique(ytr)}
     cls_indices_te = {c: np.where(yte == c)[0] for c in np.unique(yte)}
@@ -133,33 +145,30 @@ def run(
         obj_idx_tr = cls_indices_tr.get(c, np.array([], dtype=np.int64))
         obj_idx_te = cls_indices_te.get(c, np.array([], dtype=np.int64))
 
-        tr_objs_rel, va_objs_rel = split_train_val_by_objects(len(obj_idx_tr), train_per_class, val_per_class, rng)
+        tr_objs_rel, va_objs_rel = split_train_val_by_objects(len(obj_idx_tr), TRAIN_PER_CLASS, VAL_PER_CLASS, rng)
         tr_objs = obj_idx_tr[tr_objs_rel]
         va_objs = obj_idx_tr[va_objs_rel]
 
+        obj_idx_te = obj_idx_te.copy()
         rng.shuffle(obj_idx_te)
-        te_take = min(len(obj_idx_te), test_per_class)
+        te_take = min(len(obj_idx_te), TEST_PER_CLASS)
         te_objs = obj_idx_te[:te_take]
-
-        if te_take < test_per_class:
-            print(f"[warn][cls {c}] test pool has only {len(obj_idx_te)} objects < {test_per_class}; will cycle within TEST split.")
 
         def sample_from_objs(Xpool, obj_rows, target, bucket_X, bucket_Y, label_id):
             if len(obj_rows) == 0:
-                print(f"[warn][cls {label_id}] no objects in this split; duplicating first available TRAIN obj into this split (still disjoint across splits).")
                 if len(cls_indices_tr.get(label_id, [])) == 0:
                     return
                 obj_rows = cls_indices_tr[label_id][:1]
             for i in range(target):
                 obj = obj_rows[i % len(obj_rows)]
                 pts = Xpool[obj]
-                sel = sample_points(pts, points_per_sample, method=sampling, rng=rng)
+                sel = sample_points(pts, points_per_sample, method=SAMPLING, rng=rng)
                 bucket_X.append(sel[None, ...])
                 bucket_Y.append(label_id)
 
-        sample_from_objs(Xtr, tr_objs, train_per_class, trX, trY, c)
-        sample_from_objs(Xtr, va_objs, val_per_class,   vaX, vaY, c)
-        sample_from_objs(Xte, te_objs, test_per_class,  teX, teY, c)
+        sample_from_objs(Xtr, tr_objs, TRAIN_PER_CLASS, trX, trY, c)
+        sample_from_objs(Xtr, va_objs, VAL_PER_CLASS, vaX, vaY, c)
+        sample_from_objs(Xte, te_objs, TEST_PER_CLASS, teX, teY, c)
 
     trX = np.concatenate(trX, axis=0).astype(np.float32)
     vaX = np.concatenate(vaX, axis=0).astype(np.float32)
@@ -168,8 +177,8 @@ def run(
     vaY = np.asarray(vaY, dtype=np.int64)
     teY = np.asarray(teY, dtype=np.int64)
 
-    if rotation == 1:
-        R = special_ortho_group.rvs(3, random_state=int(rng.integers(0, 1<<31)))
+    if ROTATION == 1:
+        R = special_ortho_group.rvs(3, random_state=int(rng.integers(0, 1 << 31)))
         trX = trX @ R.T
         vaX = vaX @ R.T
         teX = teX @ R.T
@@ -182,22 +191,22 @@ def run(
     vaX, vaY = shuffle_xy(vaX, vaY, rng)
     teX, teY = shuffle_xy(teX, teY, rng)
 
-    fname = f"modelnet40_{K}classes_{points_per_sample}_{num_reupload}_{sampling}_train{train_per_class}_val{val_per_class}_test{test_per_class}_new.npz"
-    out_npz = out_dir / fname
+    fname = f"modelnet40_{K}classes_{points_per_sample}_{NUM_REUPLOAD}_{SAMPLING}_train{TRAIN_PER_CLASS}_val{VAL_PER_CLASS}_test{TEST_PER_CLASS}_new.npz"
+    out_npz = script_dir / fname
 
     meta = {
         "source": "ModelNet40-HDF5",
-        "class_labels_original": list(class_labels),
-        "label_map_to_compact": {int(k): int(v) for k, v in {k: i for i, k in enumerate(class_labels)}.items()},
+        "class_labels_original": list(CLASS_LABELS),
+        "label_map_to_compact": {int(k): int(v) for k, v in label_map.items()},
         "num_classes": int(K),
         "points_per_sample": int(points_per_sample),
-        "num_reupload": int(num_reupload),
-        "train_per_class": int(train_per_class),
-        "val_per_class": int(val_per_class),
-        "test_per_class": int(test_per_class),
-        "sampling": sampling,
-        "rotation": int(rotation),
-        "seed": int(seed),
+        "num_reupload": int(NUM_REUPLOAD),
+        "train_per_class": int(TRAIN_PER_CLASS),
+        "val_per_class": int(VAL_PER_CLASS),
+        "test_per_class": int(TEST_PER_CLASS),
+        "sampling": SAMPLING,
+        "rotation": int(ROTATION),
+        "seed": int(SEED),
         "official_test_kept": True,
         "object_disjoint_train_val": True
     }
@@ -215,30 +224,7 @@ def run(
     print("Train:", trX.shape, "| Val:", vaX.shape, "| Test:", teX.shape)
 
 if __name__ == "__main__":
-    ap = argparse.ArgumentParser(description="ModelNet40 -> NPZ (subset & object-disjoint train/val; official test kept)")
-    ap.add_argument("--h5_dir", required=True)
-    ap.add_argument("--class_labels", nargs="+", type=int, required=False)
-    ap.add_argument("--points_per_sample", type=int, default=4)
-    ap.add_argument("--num_reupload", type=int, default=1)
-    ap.add_argument("--train_per_class", type=int, default=700)
-    ap.add_argument("--val_per_class",   type=int, default=100)
-    ap.add_argument("--test_per_class",  type=int, default=200)
-    ap.add_argument("--sampling", choices=["fps","random"], default="fps")
-    ap.add_argument("--rotation", type=int, default=0)
-    ap.add_argument("--seed", type=int, default=42)
+    ap = argparse.ArgumentParser()
+    ap.add_argument("num_points", type=int)
     args = ap.parse_args()
-
-    labels = args.class_labels if args.class_labels else [5, 6, 10, 19, 32]
-    run(
-        h5_dir=args.h5_dir,
-        out_dir=None,
-        class_labels=labels,
-        points_per_sample=args.points_per_sample,
-        num_reupload=args.num_reupload,
-        train_per_class=args.train_per_class,
-        val_per_class=args.val_per_class,
-        test_per_class=args.test_per_class,
-        sampling=args.sampling,
-        rotation=args.rotation,
-        seed=args.seed,
-    )
+    run(args.num_points)
