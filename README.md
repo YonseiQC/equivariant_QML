@@ -180,11 +180,7 @@ python HyQuRP/create_perm_matrix_normalized.py --num_qubit 10
 
 ---
 
-## Run baselines
-
----
-
-## Run HyQuRP
+## Run HyQuRP & baselines
 
 ---
 
