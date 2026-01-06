@@ -29,10 +29,8 @@ pip install -r requirements.txt
 
 ---
 
-## Usage
 
-
-### Data
+## Data
 
 We use three object-level datasets with small-class subsets:
 
@@ -40,11 +38,11 @@ We use three object-level datasets with small-class subsets:
 - **ShapeNet-5**: birdhouse, bottle, bowl, bus, cap  
 - **Sydney Urban Objects-3 (SUO-3)**: car, traffic sign, pedestrian
 
-#### Download & place raw data
+### Download & place raw data
 
 > After downloading, place the raw dataset folders under the paths below.
 
-##### ModelNet (HDF5)
+### ModelNet (HDF5)
 
 We use the **ModelNet40 HDF5** release.
 
@@ -62,7 +60,7 @@ data/ModelNet/modelnet40_ply_hdf5_2048/
   ...
 ```
 
-##### ShapeNet (OBJ)
+#### ShapeNet (OBJ)
 
 Download :
 - https://huggingface.co/datasets/ShapeNet/ShapeNetCore/tree/main
@@ -83,7 +81,7 @@ data/ShapeNet/
     <instance_id>/models/model_normalized.obj
 ```
 
-##### Sydney Urban Objects 
+#### Sydney Urban Objects 
 
 Download :
 - https://www.acfr.usyd.edu.au/papers/SydneyUrbanObjectsDataset.shtml
@@ -98,7 +96,7 @@ data/Sydney_Urban_Objects/sydney-urban-objects-dataset/
     pedestrian/ ...
 ```
 
-#### Create NPZ files (sampling)
+### Create NPZ files (sampling)
 
 Each dataset folder provides a sampling script. The only required argument is `--num_points`.
 
@@ -119,7 +117,7 @@ data/Sydney_Urban_Objects/SUO_sampling.py
 <NUM_POINTS>: number of points per sample (e.g., 3, 4, 5, ...)
 ```
 
-##### ModelNet-5
+#### ModelNet-5
 
 ```bash
 python data/ModelNet/modelnet_sampling.py --num_points 4
@@ -127,7 +125,7 @@ python data/ModelNet/modelnet_sampling.py --num_points 5
 python data/ModelNet/modelnet_sampling.py --num_points 6
 ```
 
-##### ShapeNet-5
+#### ShapeNet-5
 
 ```bash
 python data/ShapeNet/shapenet_sampling.py --num_points 4
@@ -135,7 +133,7 @@ python data/ShapeNet/shapenet_sampling.py --num_points 5
 python data/ShapeNet/shapenet_sampling.py --num_points 6
 ```
 
-##### SUO-3
+#### SUO-3
 
 ```bash
 python data/Sydney_Urban_Objects/SUO_sampling.py --num_points 4
@@ -150,17 +148,19 @@ The generated `.npz` files will be saved into the corresponding dataset folder:
 - `data/Sydney_Urban_Objects/`
 
 
+---
 
-
-### Make matrix
+## Make matrix
 
 ---
 
-### Run baselines
+## Run baselines
 
 ---
 
-### Run HyQuRP
+## Run HyQuRP
 
 ---
+
+## Results
 
