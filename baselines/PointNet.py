@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 
 import argparse
+from pathlib import Path
 import os
 import random
 
@@ -481,6 +482,16 @@ def main():
     num_points = num_qubit // 2
     variant = normalize_variant(args.variant)
     dataset_tag, data_filename, sigma = resolve_dataset(args.dataset, num_points)
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
+
+    tag = str(dataset_tag).lower()
+    if tag == "modelnet":
+        data_filename = str(REPO / "data" / "ModelNet" / data_filename)
+    elif tag == "shapenet":
+        data_filename = str(REPO / "data" / "ShapeNet" / data_filename)
+    else:
+        data_filename = str(REPO / "data" / "Sydney_Urban_Objects" / data_filename)
 
     print(f"Using seed={base_seed}")
     print(
