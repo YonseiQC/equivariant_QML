@@ -5,7 +5,7 @@ _pre = argparse.ArgumentParser(add_help=False)
 _pre.add_argument("seed", type=int)
 _pre.add_argument("--dataset")
 _pre.add_argument("--num_qubit", type=int, required=True)
-_pre.add_argument("--variant")
+_pre.add_argument("--variant", type=str, choices=["light", "mid"])
 _pre_args, _ = _pre.parse_known_args()
 
 _num_points_pre = _pre_args.num_qubit // 2
@@ -31,11 +31,9 @@ from gates_fast import Spin_twirling, create_singlet
 tree_leaves = jax.tree_util.tree_leaves
 tree_map = jax.tree_util.tree_map
 
-
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
     return int(h[:8], 16)
-
 
 def make_rng_pack(base_seed: int, num_point: int, dataset_tag: str):
     subseed = make_subseed(base_seed, num_point, dataset_tag)
@@ -43,11 +41,9 @@ def make_rng_pack(base_seed: int, num_point: int, dataset_tag: str):
     base_key = jax.random.PRNGKey(subseed)
     return dict(subseed=subseed, scipy_rs=scipy_rs, base_key=base_key)
 
-
 scipy_rng = None
 key = None
 _global_subseed = None
-
 
 def get_Theta(npz):
     x = npz["train_dataset_x"]
@@ -58,27 +54,22 @@ def get_Theta(npz):
     norms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1))
     return jnp.max(norms) * 1.2
 
-
 def random_3d_rotation():
     return special_ortho_group.rvs(3, random_state=scipy_rng)
-
 
 def apply_3d_rotation(points):
     rotation_matrix = random_3d_rotation()
     rotation_matrix_jax = jnp.array(rotation_matrix)
     return jnp.dot(points, rotation_matrix_jax.T)
 
-
 def add_jitter(points, key_, sigma_):
     noise = jax.random.normal(key_, points.shape) * sigma_
     return points + noise
-
 
 def apply_permutation(points):
     num_points_ = points.shape[0]
     perm_indices = scipy_rng.permutation(num_points_)
     return points[perm_indices]
-
 
 def apply_data_augmentation(points, key_, sigma_, is_training=True):
     if not is_training:
@@ -86,7 +77,6 @@ def apply_data_augmentation(points, key_, sigma_, is_training=True):
     _, key2 = jax.random.split(key_)
     augmented_points = add_jitter(points, key2, sigma_)
     return augmented_points
-
 
 def augment_batch(batch_points, key_, sigma_, is_training=True):
     if not is_training:
@@ -96,11 +86,9 @@ def augment_batch(batch_points, key_, sigma_, is_training=True):
     augment_fn = jax.vmap(lambda pts, k: apply_data_augmentation(pts, k, sigma_, is_training))
     return augment_fn(batch_points, keys)
 
-
 def epoch_shuffle_numpy(x, y):
     idx = np.random.permutation(x.shape[0])
     return x[idx], y[idx]
-
 
 class MyNNLight(nn.Module):
     num_pairs: int
@@ -129,7 +117,6 @@ class MyNNLight(nn.Module):
         x = nn.tanh(x)
         x = nn.Dense(features=self.num_classes)(x)
         return x
-
 
 class MyNNMid(nn.Module):
     num_pairs: int
@@ -163,7 +150,6 @@ class MyNNMid(nn.Module):
         x = nn.Dense(self.num_classes)(x)
         return x
 
-
 def calculate_final_metrics(y_true, y_pred, num_classes_):
     y_true_np = np.array(y_true).flatten()
     y_pred_np = np.array(y_pred).flatten()
@@ -178,14 +164,12 @@ def calculate_final_metrics(y_true, y_pred, num_classes_):
     overall_accuracy = np.trace(cm) / np.sum(cm)
     return cm, class_accuracies, overall_accuracy
 
-
 def analyze_gradient_norms(grad):
     q_grad_norm = jnp.linalg.norm(grad["q"])
     c_grad_leaves = tree_leaves(grad["c"])
     c_grad_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
     total_grad_norm = jnp.sqrt(jnp.sum(jnp.square(grad["q"])) + sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
     return q_grad_norm, c_grad_norm, total_grad_norm
-
 
 def encode(point, num_qubit_):
     point_sqr = jnp.power(point, 2)
@@ -223,7 +207,6 @@ def create_Hamiltonian(num_point_):
                 + (qml.PauliZ(2 * i) - qml.PauliZ(2 * i + 1)) @ (qml.PauliZ(2 * j) - qml.PauliZ(2 * j + 1))
             )
     return terms
-
 
 def prepare_init_state(num_qubit_):
     for i in range(0, num_qubit_, 2):
@@ -267,12 +250,10 @@ num_classes = None
 variant = None
 dev = None
 
-
 def NN_apply(params_c, x):
     if variant == "light":
         return MyNNLight(num_pairs=num_pairs, num_classes=num_classes).apply(params_c, x)
     return MyNNMid(num_pairs=num_pairs, num_classes=num_classes).apply(params_c, x)
-
 
 def train(
     gate_type,
@@ -437,6 +418,7 @@ def main():
     num_points = num_qubit // 2
     num_pairs = num_points * (num_points - 1) // 2
 
+    # define hyperparameters
     num_reupload = 1
     Theta = 1.7
     sigma = 0.02
