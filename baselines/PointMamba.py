@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 
 import numpy as np
 import torch
@@ -460,6 +461,16 @@ def main():
     num_points = num_qubit // 2
     variant = normalize_variant(args.variant)
     dataset_tag, dataset_file, sigma = resolve_dataset(args.dataset, num_points)
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
+
+    tag = str(dataset_tag).lower()
+    if tag == "modelnet":
+        dataset_file = str(REPO / "data" / "ModelNet" / dataset_file)
+    elif tag == "shapenet":
+        dataset_file = str(REPO / "data" / "ShapeNet" / dataset_file)
+    else:
+        dataset_file = str(REPO / "data" / "Sydney_Urban_Objects" / dataset_file)
     cfg = variant_config(variant)
 
     np.random.seed(base_seed)
@@ -498,3 +509,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
