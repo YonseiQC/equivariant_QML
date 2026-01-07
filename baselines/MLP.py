@@ -28,7 +28,7 @@ def make_rng_pack(base_seed: int, points: int, dataset_tag: str):
     torch_gen_cuda = None
     if torch.cuda.is_available():
         torch_gen_cuda = torch.Generator(device="cuda").manual_seed(subseed)
-    return dict(subseed=subseed, np_rs=np_rs, torch_gen=torch_gen_cuda or torch_gen_cpu)
+    return dict(subseed=subseed, np_rs=np_rs, torch_gen_cpu = torch_gen_cpu, torch_gen_cuda = torch_gen_cuda)
 
 
 class MLPNet(nn.Module):
@@ -72,7 +72,9 @@ def run_one_block(base_seed: int, points: int, dataset_tag: str, variant: str):
 
     rng = make_rng_pack(base_seed, points, dataset_tag)
     np_rs = rng["np_rs"]
-    tg = rng["torch_gen"]
+    tg_cpu = rng["torch_gen_cpu"]
+    tg_cuda = rng["torch_gen_cuda"]
+    tg_loader = tg_cpu
 
     random.seed(base_seed)
     np.random.seed(base_seed)
@@ -89,7 +91,8 @@ def run_one_block(base_seed: int, points: int, dataset_tag: str, variant: str):
         return torch.matmul(pts, R.T)
 
     def add_jitter(pts: torch.Tensor, sigma_: float):
-        noise = torch.randn(pts.shape, device=pts.device, dtype=pts.dtype, generator=tg) * sigma_
+        gen = tg_cuda if (pts.is_cuda and tg_cuda is not None) else tg_cpu
+        noise = torch.randn(pts.shape, device=pts.device, dtype=pts.dtype, generator=gen) * sigma_
         return pts + noise
 
     def apply_permutation(pts: torch.Tensor):
@@ -140,7 +143,7 @@ def run_one_block(base_seed: int, points: int, dataset_tag: str, variant: str):
     val_ds = TensorDataset(torch.from_numpy(val_x), torch.from_numpy(val_y))
     test_ds = TensorDataset(torch.from_numpy(test_x), torch.from_numpy(test_y))
 
-    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, generator=tg, num_workers=0)
+    train_loader = DataLoader(train_ds, batch_size=batch_size, shuffle=True, generator=tg_loader, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_ds, batch_size=batch_size, shuffle=False, num_workers=0)
 

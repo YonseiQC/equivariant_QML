@@ -217,7 +217,7 @@ def run_experiment(dataset_file, widths, k, *, num_classes, batch_size,
                    epochs, lr, dropout, sigma, seed):
     rng = make_rng_pack(seed)
     device = rng['device']
-    torch_gen = rng['torch_gen_cuda'] or rng['torch_gen_cpu']
+    torch_gen = rng['torch_gen_cpu']
     if not os.path.exists(dataset_file):
         raise FileNotFoundError(f"데이터셋 파일 '{dataset_file}'이 존재하지 않습니다.")
     train_dataset = PointCloudDataset(dataset_file, split='train', sigma=sigma,

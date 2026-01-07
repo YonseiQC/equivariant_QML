@@ -356,7 +356,7 @@ def train_model_with_val(
 def main_with_val(data_filename, num_points, num_epochs, learning_rate, batch_size, weight_decay, seed, variant, sigma):
     rng = make_rng_pack(seed)
     device = rng["device"]
-    torch_gen = rng["torch_gen_cuda"] or rng["torch_gen_cpu"]
+    torch_gen = rng["torch_gen_cpu"]
 
     print(f"Loading dataset: {data_filename}")
     try:
