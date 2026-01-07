@@ -294,7 +294,7 @@ def main():
     args = parser.parse_args()
 
     base_seed = args.seed
-    num_qubit = args.num_points
+    num_points = args.num_points
     variant = normalize_variant(args.variant)
     widths = variant_widths(variant)
     dataset_tag, dataset_file, num_classes, sigma = resolve_dataset(args.dataset, num_points)
