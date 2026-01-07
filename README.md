@@ -11,13 +11,6 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 ![figure](Image2.png)
 
 
-**Key Results**
-| Dataset | #Points | Params | HyQuRP (acc) | Best baseline (acc) |
-|---|---:|---:|---:|---:|
-| ModelNet | 6 | ~1K | XX.XX | XX.XX |
-| ShapeNet | 6 | ~1K | XX.XX | XX.XX |
-| Sydney Urban Objects | 6 | ~1K | XX.XX | XX.XX |
-
 ---
 
 ## Installation (I will check)
