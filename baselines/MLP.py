@@ -250,22 +250,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("seed", type=int)
     parser.add_argument("--dataset", type=str, choices=["modelnet", "shapenet", "suo"], required=True)
-    parser.add_argument("--num_qubit", type=int, required=True)
+    parser.add_argument("--num_points", type=int, required=True)
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
     args = parser.parse_args()
 
     base_seed = args.seed
-    num_qubit = args.num_qubit
-    if num_qubit % 2 != 0:
-        raise ValueError("num_qubit must be even")
-
-    num_points = num_qubit // 2
+    num_points = args.num_points
     variant = normalize_variant(args.variant)
     dataset_tag, _ = resolve_dataset(args.dataset, num_points)
 
     print(f"Using seed={base_seed}")
     print(
-        f"dataset={dataset_tag}, variant={variant}, num_qubit={num_qubit}, num_points={num_points}"
+        f"dataset={dataset_tag}, variant={variant}, num_points={num_points}"
     )
 
     acc = run_one_block(base_seed, num_points, dataset_tag, variant)
