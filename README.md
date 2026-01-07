@@ -16,8 +16,8 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 ## Installation
 
 ```bash
-git clone https://github.com/<USER>/<REPO>.git
-cd <REPO>
+git clone https://github.com/YonseiQC/Equivariant_QML.git
+cd Equivariant_QML
 python3 -m pip install -U pip
 python3 -m pip install -r requirements.txt
 python3 -m pip uninstall -y jax jaxlib jax-cuda12-plugin jax-cuda12-pjrt jax_plugins # Cleanup (for clarity)
