@@ -20,7 +20,7 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 
 ---
 
-## Installation
+## Installation (I will check)
 
 ### Requirements
 - Python >= 3.10
