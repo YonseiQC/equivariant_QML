@@ -5,7 +5,7 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 
 
 <p align="center">
-  <img src="Image1.png" width=600" />
+  <img src="Image1.png" width=612" />
 </p>
 
 ![figure](Image2.png)
@@ -22,10 +22,6 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 
 ## Installation (I will check)
 
-### System Requirements
-
-
-### Setup
 ```bash
 git clone https://github.com/<USER>/<REPO>.git
 cd <REPO>
@@ -34,7 +30,9 @@ python3 -m pip install -r requirements.txt
 python3 -m pip uninstall -y jax jaxlib jax-cuda12-plugin jax-cuda12-pjrt jax_plugins # Cleanup (for clarity)
 python3 -m pip install -r requirements-jax-cuda12.txt
 ```
->Note: requirements-jax-cuda12.txt is only needed if you run the JAX-based models on GPU (HyQuRP, RP-EQGNN, Set-MLP).
+
+This installs the CUDA 12 JAX backend required to run the JAX-based models (HyQuRP, RP-EQGNN, Set-MLP) on GPU.
+
 ---
 
 
