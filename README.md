@@ -4,14 +4,19 @@
 HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that maintains rotational and permutational equivariance in its representations, enabling rotation- and permutation-invariant classification. We show that HyQuRP outperforms most classical and quantum state-of-the-art models on various datasets in the sparse point regime.
 
 
+<p align="center">
+  <img src="Image1.png" width=900" />
+</p>
+
+![figure](Image2.png)
+
+
 **Key Results**
 | Dataset | #Points | Params | HyQuRP (acc) | Best baseline (acc) |
 |---|---:|---:|---:|---:|
 | ModelNet | 6 | ~1K | XX.XX | XX.XX |
 | ShapeNet | 6 | ~1K | XX.XX | XX.XX |
 | Sydney Urban Objects | 6 | ~1K | XX.XX | XX.XX |
-
-![figure](Image1.png)
 
 ---
 
