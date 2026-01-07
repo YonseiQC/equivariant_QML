@@ -258,7 +258,7 @@ Each script prints validation progress and reports the final Test Overall Accura
 
 
 
-> Full per-seed results are stored in `raw_results/` (e.g., `raw_results/modelnet.csv`, `raw_results/shapenet.csv`, `raw_results/suo.csv`).
+> Full per-seed results are stored in `raw_results.csv`.
 
 
 
