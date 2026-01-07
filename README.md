@@ -188,7 +188,7 @@ python baselines/<BASELINE_MODEL>.py <SEED> --dataset <DATASET> --num_qubit <NUM
 
 Example:
 ```bash
-python baselines/DGCNN.py 2026 --dataset modelnet --num_qubit 6 --variant light --k 3
+python baselines/DGCNN.py 2026 --dataset modelnet --num_points 6 --variant light --k 3
 ```
 
 Each script prints validation progress and reports the final Test Overall Accuracy at the end.
