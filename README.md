@@ -3,13 +3,15 @@
 ## Introduction
 HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that maintains rotational and permutational equivariance in its representations, enabling rotation- and permutation-invariant classification. We show that HyQuRP outperforms most classical and quantum state-of-the-art models on various datasets in the sparse point regime.
 
-**Key Results**
 
+**Key Results**
 | Dataset | #Points | Params | HyQuRP (acc) | Best baseline (acc) |
 |---|---:|---:|---:|---:|
 | ModelNet | 6 | ~1K | XX.XX | XX.XX |
 | ShapeNet | 6 | ~1K | XX.XX | XX.XX |
 | Sydney Urban Objects | 6 | ~1K | XX.XX | XX.XX |
+
+![figure](Image1.png)
 
 ---
 
@@ -42,9 +44,9 @@ We use three object-level datasets with small-class subsets:
 
 > After downloading, place the raw dataset folders under the paths below.
 
-### ModelNet (HDF5)
+#### ModelNet (HDF5)
 
-We use the **ModelNet40 HDF5** release.
+We use the ModelNet40 HDF5 release.
 
 Download :
 - https://huggingface.co/datasets/Msun/modelnet40/tree/d5dc795541800feeb7a4b3bd3142729a0d2adf7a
@@ -100,45 +102,18 @@ data/Sydney_Urban_Objects/sydney-urban-objects-dataset/
 
 Each dataset folder provides a sampling script. The only required argument is `--num_points`.
 
-> You can run the scripts from the repository root.
-
-**General usage**
+From the repository root:
 
 ```bash
 python <sampling_script.py> --num_points <NUM_POINTS>
-<sampling_script.py>: one of
-
-data/ModelNet/modelnet_sampling.py
-
-data/ShapeNet/shapenet_sampling.py
-
-data/Sydney_Urban_Objects/SUO_sampling.py
-
-<NUM_POINTS>: number of points per sample (e.g., 3, 4, 5, ...)
 ```
+- `<sampling_script.py>` : one of `data/ModelNet/modelnet_sampling.py`, `data/ShapeNet/shapenet_sampling.py`, `data/Sydney_Urban_Objects/SUO_sampling.py`
 
-#### ModelNet-5
+- `<NUM_POINTS>` : number of points per sample (e.g., 3, 4, 5, ...)
 
+Example:
 ```bash
-python data/ModelNet/modelnet_sampling.py --num_points 4
-python data/ModelNet/modelnet_sampling.py --num_points 5
 python data/ModelNet/modelnet_sampling.py --num_points 6
-```
-
-#### ShapeNet-5
-
-```bash
-python data/ShapeNet/shapenet_sampling.py --num_points 4
-python data/ShapeNet/shapenet_sampling.py --num_points 5
-python data/ShapeNet/shapenet_sampling.py --num_points 6
-```
-
-#### SUO-3
-
-```bash
-python data/Sydney_Urban_Objects/SUO_sampling.py --num_points 4
-python data/Sydney_Urban_Objects/SUO_sampling.py --num_points 5
-python data/Sydney_Urban_Objects/SUO_sampling.py --num_points 6
 ```
 
 The generated `.npz` files will be saved into the corresponding dataset folder:
@@ -153,6 +128,7 @@ The generated `.npz` files will be saved into the corresponding dataset folder:
 ## HyQuRP Matrices
 
 HyQuRP uses precomputed (normalized) permutation matrices stored in `HyQuRP/PermMatrix/`.
+
 Generate them by running `HyQuRP/create_perm_matrix_normalized.py` once per `num_qubit`.
 
 ### Generate matrices
@@ -162,12 +138,13 @@ From the repository root:
 ```bash
 python HyQuRP/create_perm_matrix_normalized.py --num_qubit <NUM_QUBIT>
 ```
+>Note: the matrices have shape `(2**num_qubit, 2**num_qubit)`, so large num_qubit can be very memory/time intensive.
+
 Example:
 ```bash
 python HyQuRP/create_perm_matrix_normalized.py --num_qubit 8
-python HyQuRP/create_perm_matrix_normalized.py --num_qubit 10
 ```
->Note: the matrices have shape `(2**num_qubit, 2**num_qubit)`, so large num_qubit can be very memory/time intensive.
+
 
 Running the script will create / update:
 
@@ -180,18 +157,19 @@ where `num_perm` ranges from 2 to `(num_qubit // 2)`.
 
 ## Run HyQuRP & baselines
 
-> Run commands from the repository root.
 > Make sure the corresponding `.npz` file already exists under:
 > `data/ModelNet/`, `data/ShapeNet/`, or `data/Sydney_Urban_Objects/`.
 
 
 ### Run HyQuRP
 
+From the repository root:
+
 ```bash
 python HyQuRP/HyQuRP.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT>
 ```
 
-> Make sure the precomputed (normalized) permutation matrices are available in `HyQuRP/PermMatrix/`.
+> Make sure the precomputed HyQuRP matrices are available in `HyQuRP/PermMatrix/`.
 
 - `<DATASET>`: `modelnet`, `shapenet`, or `suo`
 - `<VARIANT>`: `light` or `mid`
@@ -208,13 +186,12 @@ python baselines/<BASELINE_MODEL>.py <SEED> --dataset <DATASET> --num_qubit <NUM
 - `<BASELINE_MODEL>`: the baseline script name (e.g., `DGCNN`, `PointNet`, ...)
 - Some baselines may require extra arguments (e.g., `--k <K>` for kNN-based models).
 
-#### Example: DGCNN
-
+Example:
 ```bash
-python baselines/DGCNN.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT> --k <K>
+python baselines/DGCNN.py 2026 --dataset modelnet --num_qubit 6 --variant light --k 3
 ```
 
-Each script prints validation progress and reports the final **Test Overall Accuracy** at the end.
+Each script prints validation progress and reports the final Test Overall Accuracy at the end.
 
 
 ---
