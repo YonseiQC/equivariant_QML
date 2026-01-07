@@ -160,7 +160,7 @@ where `num_perm` ranges from 2 to `(num_qubit // 2)`.
 
 ---
 
-## Run HyQuRP & baselines
+## HyQuRP & baselines
 
 > Make sure the corresponding `.npz` file already exists under:
 > `data/ModelNet/`, `data/ShapeNet/`, or `data/Sydney_Urban_Objects/`.
