@@ -1,0 +1,5 @@
+--index-url https://us-python.pkg.dev/ml-oss-artifacts-published/jax/simple/
+jax==0.6.0
+jaxlib==0.6.0
+jax-cuda12-plugin[with-cuda]==0.6.0
+jax-cuda12-pjrt==0.6.0
