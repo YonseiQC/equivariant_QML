@@ -249,7 +249,7 @@ def train(
     _cpp_circuit = QRPCircuit(num_qubit_ // 2)
     cpu_device = jax.devices("cpu")[0]
 
-    if jax.devices('gpu'):
+    if jax.default_backend() == 'gpu':
         gpu_device = jax.devices('gpu')[0]
     else:
         gpu_device = jax.devices('cpu')[0]
@@ -276,13 +276,15 @@ def train(
         f.defvjp(f_fwd, f_bwd)
         return f
 
-    NN_jit = jax.jit(NN_apply)
-    
     def forward_expval(params_, x_batch):
         qnode = circuit(x_batch)
         expval_ham = qnode(params_["q"])
-        logits = NN_jit(params_["c"], expval_ham)
+        logits = NN_apply(params_["c"], expval_ham)
         return logits
+
+    def expval_to_loss(params_c, expval_ham, y_batch):
+        logits = NN_apply(params_c, expval_ham)
+        return jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, y_batch))
 
     def loss_fn(params_, x_batch, y_batch):
         logits = forward_expval(params_, x_batch)
@@ -297,6 +299,21 @@ def train(
         preds = jnp.argmax(logits, axis=-1)
         return jnp.mean((preds == y.squeeze()).astype(jnp.float32))
 
+    expval_to_loss_grad_param = jax.jit(jax.value_and_grad(expval_to_loss, argnums=0))
+    expval_to_loss_grad_input = jax.jit(jax.grad(expval_to_loss, argnums=1))
+
+    def value_and_grad(params_, x_batch, y_batch):
+        points_cpu = jax.device_put(x_batch, device=cpu_device)
+        params_cpu = jax.device_put(params_["q"], device=cpu_device)
+        expval, states = _cpp_circuit.forward(points_cpu, params_cpu)
+        expval = jax.device_put(expval, gpu_device)
+
+        loss, grad_c = expval_to_loss_grad_param(params_["c"], expval, y_batch)
+        grad_expval = expval_to_loss_grad_input(params_["c"], expval, y_batch)
+        grad_q = _cpp_circuit.vjp(params_cpu, states, jax.device_put(grad_expval, device=cpu_device))
+
+        return loss, {"q": grad_q, "c": grad_c}
+    
     solver = optax.adam(learning_rate=learning_rate)
     opt_state = solver.init(params)
 
@@ -326,7 +343,7 @@ def train(
         epoch_total_grad_norms = []
 
         for i in range(num_batches):
-            loss, grad = jax.value_and_grad(loss_fn)(params, current_train_x[i], train_y_batched[i])
+            loss, grad = value_and_grad(params, current_train_x[i], train_y_batched[i])
 
             qn, cn, tn = analyze_gradient_norms(grad)
             epoch_q_grad_norms.append(qn)
