@@ -177,7 +177,7 @@ python HyQuRP/HyQuRP.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --var
 All baseline scripts live under `baselines/`. Use the same core flags:
 
 ```bash
-python baselines/<BASELINE_MODEL>.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --variant <VARIANT> [--extra_args ...]
+python baselines/<BASELINE_MODEL>.py <SEED> --dataset <DATASET> --num_points <NUM_POINTS> --variant <VARIANT> [--extra_args ...]
 ```
 
 - `<BASELINE_MODEL>`: the baseline script name (e.g., `DGCNN`, `PointNet`, ...)
