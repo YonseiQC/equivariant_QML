@@ -35,9 +35,8 @@ class Spin_twirling(qml.operation.Operation):
         cache_key = (num_qubit, num_perm)
 
         if cache_key not in EIGEN_CACHE:
-            print(f"Computing UDU† decomposition for qubits={num_qubit}, perm={num_perm}")
+            print(f"Computing for qubits={num_qubit}, perm={num_perm}")
             EIGEN_CACHE[cache_key] = precompute_UDU_decomposition(num_qubit, num_perm)
-            print("UDU† decomposition cached!")
         
         eigenvals_1, U_1, eigenvals_2, U_2 = EIGEN_CACHE[cache_key]
 
