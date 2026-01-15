@@ -458,7 +458,7 @@ def main():
     Theta = 1.7
     sigma = 0.02
     use_augmentation = True
-    epochs = 1000
+    epochs = 3
     l2 = 0
     gate_type = "u2"
     num_blocks_reupload = 12
