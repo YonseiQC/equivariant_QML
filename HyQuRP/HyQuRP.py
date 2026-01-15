@@ -198,14 +198,6 @@ def calculate_final_metrics(y_true, y_pred, num_classes_):
     return cm, class_accuracies, overall_accuracy
 
 
-def analyze_gradient_norms(grad):
-    q_grad_norm = jnp.linalg.norm(grad["q"])
-    c_grad_leaves = tree_leaves(grad["c"])
-    c_grad_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
-    total_grad_norm = jnp.sqrt(jnp.sum(jnp.square(grad["q"])) + sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
-    return q_grad_norm, c_grad_norm, total_grad_norm
-
-
 def encode(point, num_qubit_):
     point_sqr = jnp.power(point, 2)
     norms = jnp.sqrt(jnp.sum(point_sqr, axis=-1))
@@ -306,7 +298,6 @@ def train(
     test_dataset_y = data["test_y"]
 
     base_key = rng_pack["base_key"]
-    scipy_rng = rng_pack["scipy_rs"]
     global_subseed = rng_pack["subseed"]
 
     assert len(train_dataset_x) == len(train_dataset_y)
@@ -379,25 +370,12 @@ def train(
         train_y_batched = ys.reshape(num_batches, minibatch_size)
 
         epoch_train_loss = 0.0
-        epoch_q_grad_norms = []
-        epoch_c_grad_norms = []
-        epoch_total_grad_norms = []
 
         for i in range(num_batches):
             loss, grad = jax.value_and_grad(loss_fn, argnums=0)(params, current_train_x[i], train_y_batched[i])
-
-            qn, cn, tn = analyze_gradient_norms(grad)
-            epoch_q_grad_norms.append(qn)
-            epoch_c_grad_norms.append(cn)
-            epoch_total_grad_norms.append(tn)
-
             updates, opt_state = solver.update(grad, opt_state, params)
             params = optax.apply_updates(params, updates)
             epoch_train_loss += loss / num_batches
-
-        avg_q = jnp.mean(jnp.array(epoch_q_grad_norms))
-        avg_c = jnp.mean(jnp.array(epoch_c_grad_norms))
-        avg_tot = jnp.mean(jnp.array(epoch_total_grad_norms))
 
         val_loss = loss_fn(params, val_dataset_x, val_dataset_y)
         val_acc = accuracy_fn(params, val_dataset_x, val_dataset_y)
@@ -413,9 +391,6 @@ def train(
                 "train_loss": float(epoch_train_loss),
                 "val_loss": float(val_loss),
                 "val_acc": float(val_acc),
-                "avg_grad_q": float(avg_q),
-                "avg_grad_c": float(avg_c),
-                "avg_grad_total": float(avg_tot),
             }
         )
 
