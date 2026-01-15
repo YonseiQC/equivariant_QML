@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import sys
+import json
 import atexit
 import datetime
-import json
-import sys
-from pathlib import Path
 
 _METRICS_FH = None
 
@@ -32,46 +31,68 @@ def _metrics_write(obj):
     _METRICS_FH.write(json.dumps(obj, ensure_ascii=False) + "\n")
     _METRICS_FH.flush()
 
-def _setup_run(run_id, config):
-    global _METRICS_FH
-    repo = Path(__file__).resolve().parent.parent
+def _find_repo_root(start):
+    p = start
+    while True:
+        if (p / "data").exists():
+            return p
+        if p.parent == p:
+            return start
+        p = p.parent
+
+def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs, k=None):
+    here = Path(__file__).resolve().parent
+    repo = _find_repo_root(here)
+    run_id = f"{model}_{seed}_{dataset}_{num_points}_{variant}"
+    if k is not None:
+        run_id = f"{run_id}_{k}"
     stdout_path = repo / f"{run_id}.stdout.log"
     config_path = repo / f"{run_id}.config.json"
     metrics_path = repo / f"{run_id}.metrics.jsonl"
 
-    _orig_stdout = sys.stdout
-    _orig_stderr = sys.stderr
-    _stdout_fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
-    sys.stdout = _Tee(_orig_stdout, _stdout_fh)
-    sys.stderr = _Tee(_orig_stderr, _stdout_fh)
+    orig_out, orig_err = sys.stdout, sys.stderr
+    fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(orig_out, fh)
+    sys.stderr = _Tee(orig_err, fh)
 
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(config, f, ensure_ascii=False, indent=2)
-
+    global _METRICS_FH
     _METRICS_FH = open(metrics_path, "a", encoding="utf-8", buffering=1)
-    _metrics_write({"event": "start", "timestamp": datetime.datetime.now().isoformat()})
 
     def _cleanup():
         try:
-            sys.stdout.flush()
-            sys.stderr.flush()
+            sys.stdout.flush(); sys.stderr.flush()
         except Exception:
             pass
         try:
-            _metrics_write({"event": "end", "timestamp": datetime.datetime.now().isoformat()})
+            fh.close()
         except Exception:
             pass
         try:
             _METRICS_FH.close()
         except Exception:
             pass
-        try:
-            _stdout_fh.close()
-        except Exception:
-            pass
 
     atexit.register(_cleanup)
 
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "model": str(model),
+                "seed": int(seed),
+                "dataset": str(dataset),
+                "variant": str(variant),
+                "num_points": int(num_points),
+                "epochs": int(epochs),
+                "lr": float(lr),
+                "k": None if k is None else int(k),
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    _metrics_write({"event": "start", "run_id": run_id, "timestamp": datetime.datetime.now().isoformat()})
+    return run_id
 import argparse
 from pathlib import Path
 import os
@@ -353,6 +374,20 @@ def train_one_epoch(model, train_loader, optimizer, device):
 
 
 @torch.no_grad()
+@torch.no_grad()
+def evaluate_loss(model, loader, device):
+    model.eval()
+    total = 0.0
+    n = 0
+    for data, label in loader:
+        data = data.to(device)
+        label = label.to(device)
+        out = model(data)
+        loss = F.cross_entropy(out, label, reduction="sum")
+        total += float(loss.item())
+        n += int(label.numel())
+    return total / max(n, 1)
+
 def evaluate_accuracy(model, loader, device):
     model.eval()
     correct = 0
@@ -376,8 +411,8 @@ def run_experiment(
     *,
     num_classes=5,
     batch_size=35,
-    epochs=1000,
-    lr=0.01,
+    epochs,
+        lr,
     dropout=0.0,
     sigma=0.02,
     seed=831,
@@ -429,18 +464,15 @@ def run_experiment(
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         train_acc = evaluate_accuracy(model, train_loader, device)
         val_acc = evaluate_accuracy(model, val_loader, device)
+        val_loss = evaluate_loss(model, val_loader, device)
 
         if val_acc >= best_val:
             best_val = val_acc
             best_epoch = epoch
             best_state_dict = {k_: v.detach().cpu().clone() for k_, v in model.state_dict().items()}
-            torch.save(best_state_dict, "best_compact_dgcnn_by_val.pth")
-
-        print(
-            f"Epoch {epoch:03d} | Loss: {train_loss:.4f} | "
-            f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | "
-            f"Best Val: {best_val:.4f} @ {best_epoch}"
-        )
+        # torch.save(...) disabled (no extra files)
+        print(f"epoch {epoch-1}/{epochs-1} | train loss : {train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
+        _metrics_write({"epoch": int(epoch-1), "train_loss": float(train_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
 
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
@@ -449,6 +481,7 @@ def run_experiment(
     print("\n==============================")
     print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val:.4f}")
     print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
+    _metrics_write({"event": "end", "test_acc": float(test_acc)})
     print("==============================\n")
 
     return test_acc
@@ -493,41 +526,6 @@ def main():
     parser.add_argument("--k", type=int, required=True)
     args = parser.parse_args()
 
-    _model = Path(__file__).stem
-    _seed = getattr(args, "seed", None)
-    _dataset = getattr(args, "dataset", None)
-    _num_points = getattr(args, "num_points", None)
-    if _num_points is None:
-        _num_points = getattr(args, "num_point", None)
-    if _num_points is None:
-        _num_points = getattr(args, "npoints", None)
-    _variant = getattr(args, "variant", None)
-
-    _sigma = None
-    if _dataset is not None:
-        _sigma = 0.01 if str(_dataset).lower() == "suo" else 0.02
-        if hasattr(args, "sigma"):
-            setattr(args, "sigma", _sigma)
-        else:
-            globals()["sigma"] = _sigma
-
-    _k = getattr(args, "k", None)
-    _run_id = f"{_model}_{_seed}_{_dataset}_{_num_points}_{_variant}_{_k}"
-    _setup_run(
-        _run_id,
-        {
-            "model": _model,
-            "seed": _seed,
-            "dataset": _dataset,
-            "num_points": _num_points,
-            "variant": _variant,
-            "sigma": _sigma,
-            "argv": sys.argv,
-            "timestamp": datetime.datetime.now().isoformat(),
-        },
-    )
-
-
     base_seed = args.seed
     num_points = args.num_points
     variant = normalize_variant(args.variant)
@@ -545,10 +543,10 @@ def main():
         dataset_file = str(REPO / "data" / "Sydney_Urban_Objects" / dataset_file)
     k = args.k
 
-    print(f"Using seed={base_seed}")
-    print(
-        f"dataset={dataset_tag}, variant={variant}, num_points={num_points}, k={k}"
-    )
+    epochs = 1000
+    lr = 0.01
+    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs, k=k)
+    print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
 
     test_acc = run_experiment(
         dataset_file,
