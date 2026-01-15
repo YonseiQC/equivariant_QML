@@ -1,5 +1,8 @@
 import argparse
 from pathlib import Path
+import sys
+import json
+import atexit
 
 _pre = argparse.ArgumentParser(add_help=False)
 _pre.add_argument("seed", type=int)
@@ -31,9 +34,11 @@ from gates_fast import Spin_twirling, create_singlet
 tree_leaves = jax.tree_util.tree_leaves
 tree_map = jax.tree_util.tree_map
 
+
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
     return int(h[:8], 16)
+
 
 def make_rng_pack(base_seed: int, num_point: int, dataset_tag: str):
     subseed = make_subseed(base_seed, num_point, dataset_tag)
@@ -41,35 +46,58 @@ def make_rng_pack(base_seed: int, num_point: int, dataset_tag: str):
     base_key = jax.random.PRNGKey(subseed)
     return dict(subseed=subseed, scipy_rs=scipy_rs, base_key=base_key)
 
-scipy_rng = None
-key = None
-_global_subseed = None
 
-def get_Theta(npz):
-    x = npz["train_dataset_x"]
-    x = jnp.array(x)
-    if x.ndim == 4:
-        x = x.reshape(-1, x.shape[-2], x.shape[-1])
-    x = x - jnp.mean(x, axis=0)
-    norms = jnp.sqrt(jnp.sum(jnp.square(x), axis=-1))
-    return jnp.max(norms) * 1.2
+_METRICS_FH = None
 
-def random_3d_rotation():
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+        return len(data)
+
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+
+    def isatty(self):
+        for s in self.streams:
+            if hasattr(s, "isatty") and s.isatty():
+                return True
+        return False
+
+
+def _metrics_write(obj):
+    global _METRICS_FH
+    if _METRICS_FH is None:
+        return
+    _METRICS_FH.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    _METRICS_FH.flush()
+
+
+def random_3d_rotation(scipy_rng):
     return special_ortho_group.rvs(3, random_state=scipy_rng)
 
-def apply_3d_rotation(points):
-    rotation_matrix = random_3d_rotation()
+
+def apply_3d_rotation(points, scipy_rng):
+    rotation_matrix = random_3d_rotation(scipy_rng)
     rotation_matrix_jax = jnp.array(rotation_matrix)
     return jnp.dot(points, rotation_matrix_jax.T)
+
 
 def add_jitter(points, key_, sigma_):
     noise = jax.random.normal(key_, points.shape) * sigma_
     return points + noise
 
-def apply_permutation(points):
+
+def apply_permutation(points, scipy_rng):
     num_points_ = points.shape[0]
     perm_indices = scipy_rng.permutation(num_points_)
     return points[perm_indices]
+
 
 def apply_data_augmentation(points, key_, sigma_, is_training=True):
     if not is_training:
@@ -77,6 +105,7 @@ def apply_data_augmentation(points, key_, sigma_, is_training=True):
     _, key2 = jax.random.split(key_)
     augmented_points = add_jitter(points, key2, sigma_)
     return augmented_points
+
 
 def augment_batch(batch_points, key_, sigma_, is_training=True):
     if not is_training:
@@ -86,9 +115,11 @@ def augment_batch(batch_points, key_, sigma_, is_training=True):
     augment_fn = jax.vmap(lambda pts, k: apply_data_augmentation(pts, k, sigma_, is_training))
     return augment_fn(batch_points, keys)
 
+
 def epoch_shuffle_numpy(x, y):
     idx = np.random.permutation(x.shape[0])
     return x[idx], y[idx]
+
 
 class MyNNLight(nn.Module):
     num_pairs: int
@@ -117,6 +148,7 @@ class MyNNLight(nn.Module):
         x = nn.tanh(x)
         x = nn.Dense(features=self.num_classes)(x)
         return x
+
 
 class MyNNMid(nn.Module):
     num_pairs: int
@@ -150,6 +182,7 @@ class MyNNMid(nn.Module):
         x = nn.Dense(self.num_classes)(x)
         return x
 
+
 def calculate_final_metrics(y_true, y_pred, num_classes_):
     y_true_np = np.array(y_true).flatten()
     y_pred_np = np.array(y_pred).flatten()
@@ -164,12 +197,14 @@ def calculate_final_metrics(y_true, y_pred, num_classes_):
     overall_accuracy = np.trace(cm) / np.sum(cm)
     return cm, class_accuracies, overall_accuracy
 
+
 def analyze_gradient_norms(grad):
     q_grad_norm = jnp.linalg.norm(grad["q"])
     c_grad_leaves = tree_leaves(grad["c"])
     c_grad_norm = jnp.sqrt(sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
     total_grad_norm = jnp.sqrt(jnp.sum(jnp.square(grad["q"])) + sum(jnp.sum(jnp.square(g)) for g in c_grad_leaves))
     return q_grad_norm, c_grad_norm, total_grad_norm
+
 
 def encode(point, num_qubit_):
     point_sqr = jnp.power(point, 2)
@@ -208,69 +243,71 @@ def create_Hamiltonian(num_point_):
             )
     return terms
 
+
 def prepare_init_state(num_qubit_):
     for i in range(0, num_qubit_, 2):
         create_singlet(i, i + 1)
 
 
-def create_twirling_circuit(num_qubit_, num_blocks_reupload, num_reupload, Theta_, H):
+def create_twirling_circuit(num_qubit_, num_blocks_reupload, Theta_, H):
     def twirling_circuit(params, data_pt):
         prepare_init_state(num_qubit_)
         k = 0
-        for i in range(num_reupload):
-            data = data_pt[:, i, :, :]
-            encode(data / Theta_, num_qubit_)
-            for _ in range(num_blocks_reupload):
-                for p in range(2, int(num_qubit_ / 2) + 1):
-                    Spin_twirling(params["q"][k], params["q"][k + 1], p, wires=range(num_qubit_))
-                    k += 2
+        data = data_pt[:, 0, :, :]
+        encode(data / Theta_, num_qubit_)
+        for _ in range(num_blocks_reupload):
+            for p in range(2, int(num_qubit_ / 2) + 1):
+                Spin_twirling(params["q"][k], params["q"][k + 1], p, wires=range(num_qubit_))
+                k += 2
         return [qml.expval(h) for h in H]
 
     return twirling_circuit
 
 
-def ensure_reupload_dim(x, num_reupload):
+def ensure_reupload_dim(x):
     if x.ndim == 3:
-        return x.reshape(x.shape[0], num_reupload, -1, 3)
+        return x.reshape(x.shape[0], 1, -1, 3)
     if x.ndim == 4:
         return x
     raise ValueError(f"Unexpected shape for point cloud: {x.shape}")
 
 
-train_dataset_x = None
-train_dataset_y = None
-val_dataset_x = None
-val_dataset_y = None
-test_dataset_x = None
-test_dataset_y = None
-
-num_pairs = None
-num_points = None
-num_classes = None
-variant = None
-dev = None
-
-def NN_apply(params_c, x):
+def NN_apply(variant, num_pairs, num_classes, params_c, x):
     if variant == "light":
         return MyNNLight(num_pairs=num_pairs, num_classes=num_classes).apply(params_c, x)
     return MyNNMid(num_pairs=num_pairs, num_classes=num_classes).apply(params_c, x)
 
+
 def train(
+    *,
+    data,
+    rng_pack,
+    dev,
+    variant,
+    num_pairs,
+    num_classes,
     gate_type,
     minibatch_size,
     Theta_,
     epochs,
-    key_,
     init_scale,
     num_blocks_reupload,
     num_qubit_,
-    num_reupload,
     use_augmentation,
     sigma_,
     l2_,
     learning_rate,
 ):
-    global train_dataset_x, train_dataset_y, val_dataset_x, val_dataset_y, test_dataset_x, test_dataset_y
+    train_dataset_x = data["train_x"]
+    train_dataset_y = data["train_y"]
+    val_dataset_x = data["val_x"]
+    val_dataset_y = data["val_y"]
+    test_dataset_x = data["test_x"]
+    test_dataset_y = data["test_y"]
+
+    base_key = rng_pack["base_key"]
+    scipy_rng = rng_pack["scipy_rs"]
+    global_subseed = rng_pack["subseed"]
 
     assert len(train_dataset_x) == len(train_dataset_y)
     assert len(train_dataset_x) % minibatch_size == 0
@@ -281,22 +318,22 @@ def train(
     if gate_type != "u2":
         raise ValueError("Only gate_type='u2' is supported in this script.")
 
-    init_u2 = init_scale * math.pi / (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * num_reupload))
-    qkey = jax.random.PRNGKey(make_subseed(_global_subseed, "init_q"))
+    init_u2 = init_scale * math.pi / (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * 1))
+    qkey = jax.random.PRNGKey(make_subseed(global_subseed, "init_q"))
     params_q = init_u2 * jax.random.uniform(
-        qkey, (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * num_reupload),)
+        qkey, (2 * (int(num_qubit_ / 2) - 1) * (num_blocks_reupload * 1),)
     )
 
     dummy_input = jnp.ones((1, 2 * num_pairs))
     if variant == "light":
-        params_c = MyNNLight(num_pairs=num_pairs, num_classes=num_classes).init(key_, dummy_input)
+        params_c = MyNNLight(num_pairs=num_pairs, num_classes=num_classes).init(base_key, dummy_input)
     else:
-        params_c = MyNNMid(num_pairs=num_pairs, num_classes=num_classes).init(key_, dummy_input)
+        params_c = MyNNMid(num_pairs=num_pairs, num_classes=num_classes).init(base_key, dummy_input)
 
     params = {"q": params_q, "c": params_c}
 
     twirling_qnode = qml.QNode(
-        create_twirling_circuit(num_qubit_, num_blocks_reupload, num_reupload, Theta_, ham),
+        create_twirling_circuit(num_qubit_, num_blocks_reupload, Theta_, ham),
         device=dev,
         interface="jax",
     )
@@ -304,7 +341,7 @@ def train(
 
     def forward_expval(params_, x_batch):
         expval_ham = (jnp.array(twirling_qnode(params_, x_batch))).T
-        logits = NN_apply(params_["c"], expval_ham)
+        logits = NN_apply(variant, num_pairs, num_classes, params_["c"], expval_ham)
         return logits
 
     def loss_fn(params_, x_batch, y_batch):
@@ -328,19 +365,17 @@ def train(
     params_best = params
 
     for epoch in range(epochs):
-        print(f"epoch {epoch}")
-
-        np.random.seed(make_subseed(_global_subseed, "shuffle", epoch))
+        np.random.seed(make_subseed(global_subseed, "shuffle", epoch))
         xs, ys = epoch_shuffle_numpy(train_dataset_x, train_dataset_y)
 
         if use_augmentation:
-            epoch_key = jax.random.fold_in(key_, epoch)
+            epoch_key = jax.random.fold_in(base_key, epoch)
             current_train_x = augment_batch(xs, epoch_key, sigma_, is_training=True)
         else:
             current_train_x = xs
 
         num_batches = batch_size // minibatch_size
-        current_train_x = current_train_x.reshape(num_batches, minibatch_size, num_reupload, -1, 3)
+        current_train_x = current_train_x.reshape(num_batches, minibatch_size, 1, -1, 3)
         train_y_batched = ys.reshape(num_batches, minibatch_size)
 
         epoch_train_loss = 0.0
@@ -364,43 +399,56 @@ def train(
         avg_c = jnp.mean(jnp.array(epoch_c_grad_norms))
         avg_tot = jnp.mean(jnp.array(epoch_total_grad_norms))
 
-        print(f"\nTrain Loss: {epoch_train_loss}")
-
         val_loss = loss_fn(params, val_dataset_x, val_dataset_y)
         val_acc = accuracy_fn(params, val_dataset_x, val_dataset_y)
 
-        now = datetime.datetime.now()
-        print(f"Iteration done at {now}")
-        print(f"Val Loss: {val_loss}")
-        print(f"Val Accuracy: {val_acc}")
-        print(f"Epoch Avg Gradients - Q: {avg_q:.1e}, C: {avg_c:.1e}, Total: {avg_tot:.1e}")
-        print("-" * 50)
+        print(
+            f"epoch {epoch}/{epochs-1} | train loss : {float(epoch_train_loss):.4f} | "
+            f"val loss : {float(val_loss):.4f} | val accuracy : {float(val_acc):.4f}"
+        )
+
+        _metrics_write(
+            {
+                "epoch": int(epoch),
+                "train_loss": float(epoch_train_loss),
+                "val_loss": float(val_loss),
+                "val_acc": float(val_acc),
+                "avg_grad_q": float(avg_q),
+                "avg_grad_c": float(avg_c),
+                "avg_grad_total": float(avg_tot),
+            }
+        )
 
         if val_acc >= best_val_acc:
             best_val_acc = val_acc
             best_epoch = epoch
             params_best = tree_map(lambda x: x.copy(), params)
 
-    print("\n=== Best on Validation ===")
-    print(f"Best Val Accuracy: {float(best_val_acc):.4f} @ epoch {best_epoch}")
-
     logits = forward_expval(params_best, test_dataset_x)
     preds = jnp.argmax(logits, axis=-1)
     cm, cls_accs, overall = calculate_final_metrics(test_dataset_y, preds, num_classes)
 
-    print("\n=== Test @ Best-Validation Checkpoint ===")
-    print(f"Test Overall Accuracy: {float(overall):.4f}")
+    print("\n=== Results ===")
+    print(f"Test Accuracy: {float(overall):.4f}")
     print("Class-wise Accuracy:")
     for i, acc in enumerate(cls_accs):
         print(f"  Class {i}: {acc:.4f}")
+
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch),
+            "best_val_acc": float(best_val_acc),
+            "test_acc": float(overall),
+            "class_acc": [float(a) for a in cls_accs],
+        }
+    )
 
     return overall
 
 
 def main():
-    global scipy_rng, key, _global_subseed
-    global train_dataset_x, train_dataset_y, val_dataset_x, val_dataset_y, test_dataset_x, test_dataset_y
-    global num_pairs, num_points, num_classes, variant, dev
+    global _METRICS_FH
 
     parser = argparse.ArgumentParser()
     parser.add_argument("seed", type=int)
@@ -418,10 +466,8 @@ def main():
     num_points = num_qubit // 2
     num_pairs = num_points * (num_points - 1) // 2
 
-    # define hyperparameters
-    num_reupload = 1
     Theta = 1.7
-    sigma = 0.02
+    sigma = 0.01 if dataset_tag == "suo" else 0.02
     use_augmentation = True
     epochs = 1000
     l2 = 0
@@ -430,65 +476,118 @@ def main():
     init_scale = 0.02
     learning_rate = 0.001
 
+    HERE = Path(__file__).resolve().parent
+    REPO = HERE.parent
+
+    run_id = f"{Path(__file__).stem}_{base_seed}_{dataset_tag}_{num_points}_{variant}"
+
+    stdout_path = REPO / f"{run_id}.stdout.log"
+    config_path = REPO / f"{run_id}.config.json"
+    metrics_path = REPO / f"{run_id}.metrics.jsonl"
+
+    _orig_stdout = sys.stdout
+    _orig_stderr = sys.stderr
+
+    _stdout_fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(_orig_stdout, _stdout_fh)
+    sys.stderr = _Tee(_orig_stderr, _stdout_fh)
+
+    _METRICS_FH = open(metrics_path, "a", encoding="utf-8", buffering=1)
+
+    def _cleanup():
+        try:
+            sys.stdout.flush()
+            sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            _stdout_fh.close()
+        except Exception:
+            pass
+        try:
+            _METRICS_FH.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "model": Path(__file__).stem,
+                "seed": int(base_seed),
+                "dataset": str(dataset_tag),
+                "variant": str(variant),
+                "num_qubit": int(num_qubit),
+                "num_points": int(num_points),
+                "epochs": int(epochs),
+                "lr": float(learning_rate),
+                "Theta": float(Theta),
+                "sigma": float(sigma),
+                "use_augmentation": bool(use_augmentation),
+                "l2": float(l2),
+                "gate_type": str(gate_type),
+                "num_blocks_reupload": int(num_blocks_reupload),
+                "init_scale": float(init_scale),
+                "jax_enable_x64": bool(_enable_x64),
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+
     dev = qml.device("default.qubit", wires=num_qubit)
 
     if dataset_tag == "modelnet":
         num_classes = 5
-        npz_name = f"modelnet40_5classes_{num_points}_{num_reupload}_fps_train700_val100_test200_new.npz"
-    elif dataset_tag == "shapenet":
-        num_classes = 5
-        npz_name = f"shapenet_5classes_{num_points}_{num_reupload}_fps_train700_val100_test200_new.npz"
-    else:
-        num_classes = 3
-        npz_name = f"SUO_3classes_{num_points}_{num_reupload}_fps_train700_val100_test200_new.npz"
-
-    HERE = Path(__file__).resolve().parent
-    REPO = HERE.parent
-
-    if dataset_tag == "modelnet":
+        npz_name = f"modelnet40_5classes_{num_points}_1_fps_train700_val100_test200_new.npz"
         dataset_path = REPO / "data" / "ModelNet" / npz_name
     elif dataset_tag == "shapenet":
+        num_classes = 5
+        npz_name = f"shapenet_5classes_{num_points}_1_fps_train700_val100_test200_new.npz"
         dataset_path = REPO / "data" / "ShapeNet" / npz_name
     else:
+        num_classes = 3
+        npz_name = f"SUO_3classes_{num_points}_1_fps_train700_val100_test200_new.npz"
         dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
 
     dataset = np.load(dataset_path)
 
-    print(f"Using seed={base_seed}")
-    print(f"dataset={dataset_tag}, variant={variant}, num_qubit={num_qubit}, num_points={num_points}, num_pairs={num_pairs}")
-    print(f"Theta_fixed={Theta}, sigma={sigma}, epochs={epochs}, lr={learning_rate}")
-    print(f"Theta_from_data(debug)={float(get_Theta(dataset))}")
-    print(f"jax_enable_x64={_enable_x64}")
+    print(
+        f"seed={base_seed}, dataset={dataset_tag}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={learning_rate}"
+    )
 
-    train_dataset_x = ensure_reupload_dim(dataset["train_dataset_x"], num_reupload)
-    train_dataset_y = dataset["train_dataset_y"]
-    val_dataset_x = ensure_reupload_dim(dataset["val_dataset_x"], num_reupload)
-    val_dataset_y = dataset["val_dataset_y"]
-    test_dataset_x = ensure_reupload_dim(dataset["test_dataset_x"], num_reupload)
-    test_dataset_y = dataset["test_dataset_y"]
+    data = {
+        "train_x": ensure_reupload_dim(dataset["train_dataset_x"]),
+        "train_y": dataset["train_dataset_y"],
+        "val_x": ensure_reupload_dim(dataset["val_dataset_x"]),
+        "val_y": dataset["val_dataset_y"],
+        "test_x": ensure_reupload_dim(dataset["test_dataset_x"]),
+        "test_y": dataset["test_dataset_y"],
+    }
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
-    scipy_rng = rng_pack["scipy_rs"]
-    key = rng_pack["base_key"]
-    _global_subseed = rng_pack["subseed"]
 
-    overall = train(
+    train(
+        data=data,
+        rng_pack=rng_pack,
+        dev=dev,
+        variant=variant,
+        num_pairs=num_pairs,
+        num_classes=num_classes,
         gate_type=gate_type,
         minibatch_size=35,
         Theta_=Theta,
         epochs=epochs,
-        key_=key,
         init_scale=init_scale,
         num_blocks_reupload=num_blocks_reupload,
         num_qubit_=num_qubit,
-        num_reupload=num_reupload,
         use_augmentation=use_augmentation,
         sigma_=sigma,
         l2_=l2,
         learning_rate=learning_rate,
     )
-
-    print(float(overall))
 
 
 if __name__ == "__main__":
