@@ -381,7 +381,7 @@ def evaluate_loss(model, loader, device):
     n = 0
     for data, label in loader:
         data = data.to(device)
-        label = label.to(device)
+        label = label.squeeze().to(device)
         out = model(data)
         loss = F.cross_entropy(out, label, reduction="sum")
         total += float(loss.item())
