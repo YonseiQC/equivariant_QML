@@ -475,7 +475,7 @@ def run_experiment(
     test_acc = evaluate_accuracy(model, test_loader, device)
 
     print("\n=== Results ===")
-    print(f"Test Accuracy: {float(overall):.4f}")
+    print(f"Test Accuracy: {float(test_acc):.4f}")
     print("Class-wise Accuracy:")
     for i, acc in enumerate(cls_accs):
         print(f"  Class {i}: {acc:.4f}")
