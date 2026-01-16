@@ -463,11 +463,11 @@ def main():
     _orig_stdout = sys.stdout
     _orig_stderr = sys.stderr
 
-    _stdout_fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
+    _stdout_fh = open(stdout_path, "w", encoding="utf-8", buffering=1)
     sys.stdout = _Tee(_orig_stdout, _stdout_fh)
     sys.stderr = _Tee(_orig_stderr, _stdout_fh)
 
-    _METRICS_FH = open(metrics_path, "a", encoding="utf-8", buffering=1)
+    _METRICS_FH = open(metrics_path, "w", encoding="utf-8", buffering=1)
 
     def _cleanup():
         try:

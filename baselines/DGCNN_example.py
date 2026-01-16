@@ -52,12 +52,12 @@ def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs, k=None)
     metrics_path = repo / f"{run_id}.metrics.jsonl"
 
     orig_out, orig_err = sys.stdout, sys.stderr
-    fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
+    fh = open(stdout_path, "w", encoding="utf-8", buffering=1)
     sys.stdout = _Tee(orig_out, fh)
     sys.stderr = _Tee(orig_err, fh)
 
     global _METRICS_FH
-    _METRICS_FH = open(metrics_path, "a", encoding="utf-8", buffering=1)
+    _METRICS_FH = open(metrics_path, "w", encoding="utf-8", buffering=1)
 
     def _cleanup():
         try:
