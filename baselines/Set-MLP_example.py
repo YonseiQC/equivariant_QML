@@ -1,3 +1,6 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
 import argparse
 from pathlib import Path
 
@@ -6,7 +9,21 @@ import json
 import atexit
 import datetime
 
+import jax
+jax.config.update("jax_enable_x64", True)
+
+import hashlib
+
+import jax.numpy as jnp
+import numpy as np
+import optax
+from flax import linen as nn
+from scipy.stats import special_ortho_group
+from sklearn.metrics import confusion_matrix
+
+
 _METRICS_FH = None
+
 
 class _Tee:
     def __init__(self, *streams):
@@ -24,12 +41,14 @@ class _Tee:
                 return True
         return False
 
+
 def _metrics_write(obj):
     global _METRICS_FH
     if _METRICS_FH is None:
         return
     _METRICS_FH.write(json.dumps(obj, ensure_ascii=False) + "\n")
     _METRICS_FH.flush()
+
 
 def _find_repo_root(start):
     p = start
@@ -40,23 +59,25 @@ def _find_repo_root(start):
             return start
         p = p.parent
 
+
 def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs, k=None):
     here = Path(__file__).resolve().parent
     repo = _find_repo_root(here)
     run_id = f"{model}_{seed}_{dataset}_{num_points}_{variant}"
     if k is not None:
         run_id = f"{run_id}_{k}"
+
     stdout_path = repo / f"{run_id}.stdout.log"
     config_path = repo / f"{run_id}.config.json"
     metrics_path = repo / f"{run_id}.metrics.jsonl"
 
     orig_out, orig_err = sys.stdout, sys.stderr
-    fh = open(stdout_path, "a", encoding="utf-8", buffering=1)
+    fh = open(stdout_path, "w", encoding="utf-8", buffering=1)
     sys.stdout = _Tee(orig_out, fh)
     sys.stderr = _Tee(orig_err, fh)
 
     global _METRICS_FH
-    _METRICS_FH = open(metrics_path, "a", encoding="utf-8", buffering=1)
+    _METRICS_FH = open(metrics_path, "w", encoding="utf-8", buffering=1)
 
     def _cleanup():
         try:
@@ -74,38 +95,27 @@ def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs, k=None)
 
     atexit.register(_cleanup)
 
+    cfg = {
+        "model": str(model),
+        "seed": int(seed),
+        "dataset": str(dataset),
+        "variant": str(variant),
+        "num_points": int(num_points),
+        "epochs": int(epochs),
+        "lr": float(lr),
+        "timestamp": datetime.datetime.now().isoformat(),
+    }
+    if k is not None:
+        cfg["k"] = int(k)
+
     with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "model": str(model),
-                "seed": int(seed),
-                "dataset": str(dataset),
-                "variant": str(variant),
-                "num_points": int(num_points),
-                "epochs": int(epochs),
-                "lr": float(lr),
-                "k": None if k is None else int(k),
-                "timestamp": datetime.datetime.now().isoformat(),
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
+        json.dump(cfg, f, ensure_ascii=False, indent=2)
+
     _metrics_write({"event": "start", "run_id": run_id, "timestamp": datetime.datetime.now().isoformat()})
     return run_id
-import jax
 
-jax.config.update("jax_enable_x64", True)
 
-import hashlib
-
-import jax.numpy as jnp
-import numpy as np
-import optax
-from flax import linen as nn
-from scipy.stats import special_ortho_group
-
-# --------------------- RNG helpers (deterministic per run) ---------------------
+# --------------------- RNG helpers ---------------------
 
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
@@ -220,10 +230,16 @@ def loss_fn(params, batch_x, batch_y, model, l2):
     return loss + l2_loss
 
 
-def accuracy_fn(params, batch_x, batch_y, model):
-    logits = model.apply(params, batch_x)
-    predictions = jnp.argmax(logits, axis=-1)
-    return jnp.mean(predictions == batch_y)
+def calculate_final_metrics(y_true, y_pred, num_classes):
+    y_true_np = np.asarray(y_true).reshape(-1)
+    y_pred_np = np.asarray(y_pred).reshape(-1)
+    cm = confusion_matrix(y_true_np, y_pred_np, labels=list(range(num_classes)))
+    class_accs = []
+    for i in range(num_classes):
+        denom = cm[i].sum()
+        class_accs.append(float(cm[i, i] / denom) if denom > 0 else 0.0)
+    overall_acc = float(np.trace(cm) / np.sum(cm)) if np.sum(cm) > 0 else 0.0
+    return cm, class_accs, overall_acc
 
 
 # --------------------- Train (Val-best -> Test once) ---------------------
@@ -240,12 +256,12 @@ def train_attention_deepsets(
     use_augmentation=True,
     sigma=0.02,
 ):
-    train_x_3d = dataset["train_dataset_x"]
-    train_y = dataset["train_dataset_y"]
-    val_x_3d = dataset["val_dataset_x"]
-    val_y = dataset["val_dataset_y"]
-    test_x_3d = dataset["test_dataset_x"]
-    test_y = dataset["test_dataset_y"]
+    train_x_3d = dataset["train_dataset_x"].astype(np.float64)
+    train_y = dataset["train_dataset_y"].astype(np.int32)
+    val_x_3d = dataset["val_dataset_x"].astype(np.float64)
+    val_y = dataset["val_dataset_y"].astype(np.int32)
+    test_x_3d = dataset["test_dataset_x"].astype(np.float64)
+    test_y = dataset["test_dataset_y"].astype(np.int32)
 
     model = SimpleNN(variant=model_variant, num_classes=num_classes)
 
@@ -263,73 +279,86 @@ def train_attention_deepsets(
         params = optax.apply_updates(params, updates)
         return params, opt_state, loss
 
-    best_val_acc = -1.0
+    @jax.jit
+    def eval_loss(params, x_all, y_all):
+        logits = model.apply(params, x_all)
+        return jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, y_all))
+
+    @jax.jit
+    def eval_acc(params, x_all, y_all):
+        logits = model.apply(params, x_all)
+        preds = jnp.argmax(logits, axis=-1)
+        return jnp.mean((preds == y_all).astype(jnp.float32))
+
+    best_val_acc = 0.0
     best_epoch = -1
     best_params = params
 
-    for epoch in range(epochs):
+    train_x_all = jnp.array(train_x_3d)
+    train_y_all = jnp.array(train_y)
+    val_x_all = jnp.array(val_x_3d)
+    val_y_all = jnp.array(val_y)
+    test_x_all = jnp.array(test_x_3d)
+    test_y_all = jnp.array(test_y)
+
+    N = int(train_x_3d.shape[0])
+    assert N % batch_size == 0
+
+    num_batches = N // batch_size
+
+    for epoch in range(1, epochs + 1):
         shuffle_key = jax.random.PRNGKey(make_subseed(rng_pack["subseed"], "shuffle", epoch))
-        perm = jax.random.permutation(shuffle_key, train_x_3d.shape[0])
-        xs = jnp.array(train_x_3d)[perm]
-        ys = jnp.array(train_y)[perm]
+        perm = jax.random.permutation(shuffle_key, N)
+        xs = train_x_all[perm]
+        ys = train_y_all[perm]
 
         if use_augmentation:
             epoch_key = jax.random.fold_in(rng_pack["base_key"], epoch)
-            current_train_x_3d = augment_batch_3d(
-                xs,
-                epoch_key,
-                rng_pack["scipy_rs"],
-                sigma=sigma,
-                is_training=True,
-            )
-        else:
-            current_train_x_3d = xs
-
-        batch_size_total = len(current_train_x_3d)
-        assert batch_size_total % batch_size == 0, "batch_size이 전체 샘플 수를 정확히 나눠야 합니다."
-
-        num_batches = batch_size_total // batch_size
-        current_train_x_batched = current_train_x_3d.reshape(num_batches, batch_size, -1, 3)
-        train_y_batched = ys.reshape(num_batches, batch_size)
+            xs = augment_batch_3d(xs, epoch_key, rng_pack["scipy_rs"], sigma=sigma, is_training=True)
 
         epoch_loss = 0.0
-        for i in range(num_batches):
-            params, opt_state, loss = train_step(
-                params,
-                opt_state,
-                current_train_x_batched[i],
-                train_y_batched[i],
-            )
-            epoch_loss += loss
-        avg_train_loss = float(epoch_loss) / num_batches
+        for b in range(num_batches):
+            start = b * batch_size
+            end = start + batch_size
+            params, opt_state, loss = train_step(params, opt_state, xs[start:end], ys[start:end])
+            epoch_loss += float(loss) / num_batches
 
-        train_acc = float(accuracy_fn(params, train_x_3d, train_y, model))
-        val_acc = float(accuracy_fn(params, val_x_3d, val_y, model))
+        train_loss = float(epoch_loss)
+        val_loss = float(eval_loss(params, val_x_all, val_y_all))
+        val_acc = float(eval_acc(params, val_x_all, val_y_all))
 
         if val_acc >= best_val_acc:
-            best_val_acc = val_acc
-            best_epoch = epoch
+            best_val_acc = float(val_acc)
+            best_epoch = int(epoch - 1)
             best_params = jax.tree_util.tree_map(lambda x: x.copy(), params)
 
-        if epoch % 10 == 0 or epoch == 0:
-            print(
-                "Epoch {:3d}: Loss={:.4f} | Train={:.3f} | Val={:.3f} | Best={:.3f}@{}".format(
-                    epoch,
-                    avg_train_loss,
-                    train_acc,
-                    val_acc,
-                    best_val_acc,
-                    best_epoch,
-                )
-            )
+        print(f"epoch {epoch-1}/{epochs-1} | train loss : {train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
+        _metrics_write({"epoch": int(epoch-1), "train_loss": float(train_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
 
-    final_test_acc = float(accuracy_fn(best_params, test_x_3d, test_y, model))
+    test_logits = model.apply(best_params, test_x_all)
+    test_pred = jnp.argmax(test_logits, axis=-1)
+
+    cm, class_accs, test_acc = calculate_final_metrics(np.array(test_y_all), np.array(test_pred), num_classes)
+
     print("\n==============================")
     print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val_acc:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {final_test_acc:.4f}")
+    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
+    print("Class-wise Accuracy:")
+    for i, a in enumerate(class_accs):
+        print(f"  Class {i}: {float(a):.4f}")
     print("==============================\n")
 
-    return best_params, model, best_epoch, best_val_acc, final_test_acc
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch),
+            "best_val_acc": float(best_val_acc),
+            "test_acc": float(test_acc),
+            "class_acc": [float(a) for a in class_accs],
+        }
+    )
+
+    return best_params, model, best_epoch, best_val_acc, test_acc
 
 
 def normalize_variant(variant: str) -> str:
@@ -351,7 +380,7 @@ def resolve_dataset(dataset: str, num_points: int):
         return "modelnet", f"modelnet40_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
     if d == "shapenet":
         return "shapenet", f"shapenet_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
-    if d in {"suo", "scan"}:
+    if d == "suo":
         return "SUO", f"SUO_3classes_{num_points}_1_fps_train700_val100_test200_new.npz", 3, 0.01
     raise ValueError("dataset must be one of: modelnet, shapenet, suo")
 
@@ -364,8 +393,8 @@ def main():
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
     args = parser.parse_args()
 
-    base_seed = args.seed
-    num_points = args.num_points
+    base_seed = int(args.seed)
+    num_points = int(args.num_points)
     model_variant = normalize_variant(args.variant)
     dataset_tag, npz_name, num_classes, sigma = resolve_dataset(args.dataset, num_points)
 
@@ -381,12 +410,13 @@ def main():
     else:
         dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
 
+    lr = 0.0001
+    epochs = 3
+    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)
+
     dataset = np.load(dataset_path)
 
-    print(f"Using seed={base_seed}")
-    print(
-        f"dataset={dataset_tag}, variant={model_variant}, num_points={num_points}, sigma={sigma}"
-    )
+    print(f"seed={base_seed}, dataset={args.dataset}, variant={model_variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
     print("jax_enable_x64=True")
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
@@ -394,8 +424,8 @@ def main():
     _, _, best_epoch, best_val, test_acc_once = train_attention_deepsets(
         dataset,
         batch_size=35,
-        learning_rate=0.0001,
-        epochs=1000,
+        learning_rate=lr,
+        epochs=epochs,
         l2=0.0,
         rng_pack=rng_pack,
         model_variant=model_variant,
@@ -404,12 +434,9 @@ def main():
         sigma=sigma,
     )
 
-    print(
-        f"[{dataset_tag}] num_point={num_points} | BEST epoch={best_epoch}, Val={best_val:.4f}, Test={test_acc_once:.4f}"
-    )
+    print(f"[{dataset_tag}] num_point={num_points} | BEST epoch={best_epoch}, Val={best_val:.4f}, Test={test_acc_once:.4f}")
     print(float(test_acc_once))
 
 
 if __name__ == "__main__":
     main()
-
