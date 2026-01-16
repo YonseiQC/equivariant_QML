@@ -350,13 +350,11 @@ def train_attention_deepsets(
 
     class_acc, test_acc = class_wise_accuracy(test_true, test_preds, num_classes)
 
-    print("\n==============================")
-    print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val_acc:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
+    print("\n=== Results ===")
+    print(f"Test Accuracy = {float(test_acc):.4f}")
     print("Class-wise Accuracy:")
     for i, a in enumerate(class_acc):
         print(f"  Class {i}: {float(a):.4f}")
-    print("==============================\n")
 
     _metrics_write(
         {
