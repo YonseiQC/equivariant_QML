@@ -193,7 +193,7 @@ def get_graph_feature(x, k, idx=None):
 
     feature = torch.cat((feature - x, x), dim=3).permute(0, 3, 1, 2)
     return feature
-    
+
 
 def calculate_final_metrics(y_true, y_pred, num_classes_):
     y_true_np = np.array(y_true).flatten()
@@ -354,13 +354,6 @@ class PointCloudDataset(Dataset):
 
     def __getitem__(self, idx):
         pointcloud = self.points[idx].copy()
-
-        if len(pointcloud) < self.num_points:
-            indices = self.np_gen.choice(len(pointcloud), self.num_points, replace=True)
-        else:
-            indices = self.np_gen.choice(len(pointcloud), self.num_points, replace=False)
-        pointcloud = pointcloud[indices]
-
         is_training = self.split == "train"
         pointcloud = apply_data_augmentation(
             pointcloud, self.sigma, self.np_gen, self.np_rs, is_training=is_training
@@ -452,7 +445,7 @@ def run_experiment(
 
     if k >= num_points:
         k = max(1, num_points)
-        print(f"{k} changes to {num_points}")
+        print(f"Adjusted k to {k}")
 
     torch.manual_seed(seed)
     if torch.cuda.is_available():
