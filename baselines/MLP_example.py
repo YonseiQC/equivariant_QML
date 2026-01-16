@@ -94,7 +94,6 @@ def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs):
                 "num_points": int(num_points),
                 "epochs": int(epochs),
                 "lr": float(lr),
-                "k": None,
                 "timestamp": datetime.datetime.now().isoformat(),
             },
             f,
