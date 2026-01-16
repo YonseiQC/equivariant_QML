@@ -3,20 +3,23 @@
 
 import argparse
 from pathlib import Path
+
 import sys
 import json
 import atexit
 import datetime
-import hashlib
 
 import jax
+jax.config.update("jax_enable_x64", True)
+
+import hashlib
 import jax.numpy as jnp
 import numpy as np
 import optax
 from flax import linen as nn
 from scipy.stats import special_ortho_group
+from sklearn.metrics import confusion_matrix
 
-jax.config.update("jax_enable_x64", True)
 
 _METRICS_FH = None
 
@@ -62,6 +65,7 @@ def _find_repo_root(start):
 def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs):
     here = Path(__file__).resolve().parent
     repo = _find_repo_root(here)
+
     run_id = f"{model}_{seed}_{dataset}_{num_points}_{variant}"
     stdout_path = repo / f"{run_id}.stdout.log"
     config_path = repo / f"{run_id}.config.json"
@@ -216,7 +220,7 @@ class SimpleNN(nn.Module):
 def loss_only(params, batch_x, batch_y, model, l2):
     logits = model.apply({"params": params}, batch_x)
     loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, batch_y))
-    l2_loss = l2 * sum(jnp.sum(jnp.square(param)) for param in jax.tree_util.tree_leaves(params))
+    l2_loss = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
     return loss + l2_loss
 
 
@@ -226,10 +230,20 @@ def ce_loss(params, x_all, y_all, model):
     return jnp.mean(losses)
 
 
-def accuracy_fn(params, batch_x, batch_y, model):
-    logits = model.apply({"params": params}, batch_x)
-    predictions = jnp.argmax(logits, axis=-1)
-    return jnp.mean(predictions == batch_y)
+def accuracy_fn(params, x_all, y_all, model):
+    logits = model.apply({"params": params}, x_all)
+    preds = jnp.argmax(logits, axis=-1)
+    return jnp.mean(preds == y_all)
+
+
+def class_wise_accuracy(y_true_np: np.ndarray, y_pred_np: np.ndarray, num_classes: int):
+    cm = confusion_matrix(y_true_np, y_pred_np, labels=np.arange(num_classes))
+    class_acc = []
+    for i in range(num_classes):
+        denom = cm[i].sum()
+        class_acc.append(float(cm[i, i] / denom) if denom > 0 else 0.0)
+    overall = float(np.trace(cm) / np.sum(cm)) if cm.sum() > 0 else 0.0
+    return class_acc, overall
 
 
 def train_attention_deepsets(
@@ -277,9 +291,11 @@ def train_attention_deepsets(
     best_epoch = -1
     best_params = params
 
+    num_train = train_x_3d.shape[0]
+
     for epoch in range(epochs):
         shuffle_key = jax.random.PRNGKey(make_subseed(rng_pack["subseed"], "shuffle", epoch))
-        perm = jax.random.permutation(shuffle_key, train_x_3d.shape[0])
+        perm = jax.random.permutation(shuffle_key, num_train)
         xs = jnp.array(train_x_3d)[perm]
         ys = jnp.array(train_y.astype(np.int32))[perm]
 
@@ -295,7 +311,7 @@ def train_attention_deepsets(
         else:
             current_train_x_3d = xs
 
-        batch_size_total = len(current_train_x_3d)
+        batch_size_total = int(current_train_x_3d.shape[0])
         assert batch_size_total % batch_size == 0
 
         num_batches = batch_size_total // batch_size
@@ -304,12 +320,7 @@ def train_attention_deepsets(
 
         epoch_loss = 0.0
         for i in range(num_batches):
-            params, opt_state, loss = train_step(
-                params,
-                opt_state,
-                current_train_x_batched[i],
-                train_y_batched[i],
-            )
+            params, opt_state, loss = train_step(params, opt_state, current_train_x_batched[i], train_y_batched[i])
             epoch_loss += loss
         avg_train_loss = float(epoch_loss) / num_batches
 
@@ -333,14 +344,31 @@ def train_attention_deepsets(
             }
         )
 
-    final_test_acc = float(accuracy_fn(best_params, test_x_j, test_y_j, model))
+    test_logits = model.apply({"params": best_params}, test_x_j)
+    test_preds = np.array(jnp.argmax(test_logits, axis=-1)).astype(np.int32)
+    test_true = np.array(test_y).astype(np.int32)
+
+    class_acc, test_acc = class_wise_accuracy(test_true, test_preds, num_classes)
 
     print("\n==============================")
     print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val_acc:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {final_test_acc:.4f}")
+    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
+    print("Class-wise Accuracy:")
+    for i, a in enumerate(class_acc):
+        print(f"  Class {i}: {float(a):.4f}")
     print("==============================\n")
 
-    return best_params, model, best_epoch, best_val_acc, final_test_acc
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch),
+            "best_val_acc": float(best_val_acc),
+            "test_acc": float(test_acc),
+            "class_acc": [float(a) for a in class_acc],
+        }
+    )
+
+    return best_params, model, best_epoch, best_val_acc, float(test_acc), class_acc
 
 
 def normalize_variant(variant: str) -> str:
@@ -379,10 +407,11 @@ def main():
     num_points = args.num_points
     model_variant = normalize_variant(args.variant)
 
-    epochs = 1000
+    epochs = 3
     lr = 0.0001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)
+
     print(f"seed={base_seed}, dataset={args.dataset}, variant={model_variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
 
     dataset_tag, npz_name, num_classes, sigma = resolve_dataset(args.dataset, num_points)
@@ -402,7 +431,7 @@ def main():
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
 
-    _, _, best_epoch, best_val, test_acc_once = train_attention_deepsets(
+    _, _, best_epoch, best_val, test_acc_once, _ = train_attention_deepsets(
         dataset,
         batch_size=35,
         learning_rate=lr,
