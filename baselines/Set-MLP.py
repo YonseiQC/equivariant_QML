@@ -405,7 +405,7 @@ def main():
     num_points = args.num_points
     model_variant = normalize_variant(args.variant)
 
-    epochs = 3
+    epochs = 1000
     lr = 0.0001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)

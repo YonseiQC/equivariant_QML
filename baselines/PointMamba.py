@@ -513,7 +513,7 @@ def main():
     variant = normalize_variant(args.variant)
     dataset_tag, dataset_file, sigma = resolve_dataset(args.dataset, num_points)
 
-    epochs = 3
+    epochs = 1000
     lr = 0.001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs)

@@ -389,7 +389,7 @@ def main():
     dataset_tag, _ = resolve_dataset(args.dataset, num_points)
 
     lr = 1e-3
-    epochs = 3
+    epochs = 1000
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs)
 

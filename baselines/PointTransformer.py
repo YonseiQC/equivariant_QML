@@ -524,7 +524,7 @@ def main():
     widths = variant_widths(variant)
     dataset_tag, dataset_file, num_classes, sigma = resolve_dataset(args.dataset, num_points)
 
-    epochs = 3
+    epochs = 1000
     lr = 0.01
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs, k=args.k)
     print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
