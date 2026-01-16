@@ -108,6 +108,7 @@ def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs):
             ensure_ascii=False,
             indent=2,
         )
+
     _metrics_write({"event": "start", "run_id": run_id, "timestamp": datetime.datetime.now().isoformat()})
     return run_id
 
@@ -213,22 +214,22 @@ class SimpleNN(nn.Module):
 
 
 def loss_only(params, batch_x, batch_y, model, l2):
-    logits = model.apply(params, batch_x)
+    logits = model.apply({"params": params}, batch_x)
     loss = jnp.mean(optax.losses.softmax_cross_entropy_with_integer_labels(logits, batch_y))
-    l2_loss = l2 * sum(jnp.sum(jnp.square(p)) for p in jax.tree_util.tree_leaves(params))
+    l2_loss = l2 * sum(jnp.sum(jnp.square(param)) for param in jax.tree_util.tree_leaves(params))
     return loss + l2_loss
 
 
-def eval_loss(params, x_all, y_all, model):
-    logits = model.apply(params, x_all)
+def ce_loss(params, x_all, y_all, model):
+    logits = model.apply({"params": params}, x_all)
     losses = optax.losses.softmax_cross_entropy_with_integer_labels(logits, y_all)
     return jnp.mean(losses)
 
 
-def eval_acc(params, x_all, y_all, model):
-    logits = model.apply(params, x_all)
-    preds = jnp.argmax(logits, axis=-1)
-    return jnp.mean((preds == y_all).astype(jnp.float32))
+def accuracy_fn(params, batch_x, batch_y, model):
+    logits = model.apply({"params": params}, batch_x)
+    predictions = jnp.argmax(logits, axis=-1)
+    return jnp.mean(predictions == batch_y)
 
 
 def train_attention_deepsets(
@@ -243,15 +244,17 @@ def train_attention_deepsets(
     use_augmentation=True,
     sigma=0.02,
 ):
-    train_x_3d = np.asarray(dataset["train_dataset_x"])
-    train_y = np.asarray(dataset["train_dataset_y"]).astype(np.int32)
-    val_x_3d = np.asarray(dataset["val_dataset_x"])
-    val_y = np.asarray(dataset["val_dataset_y"]).astype(np.int32)
-    test_x_3d = np.asarray(dataset["test_dataset_x"])
-    test_y = np.asarray(dataset["test_dataset_y"]).astype(np.int32)
+    train_x_3d = dataset["train_dataset_x"]
+    train_y = dataset["train_dataset_y"]
+    val_x_3d = dataset["val_dataset_x"]
+    val_y = dataset["val_dataset_y"]
+    test_x_3d = dataset["test_dataset_x"]
+    test_y = dataset["test_dataset_y"]
 
     model = SimpleNN(variant=model_variant, num_classes=num_classes)
-    params = model.init(rng_pack["base_key"], jnp.array(train_x_3d[:1]))["params"]
+
+    variables = model.init(rng_pack["base_key"], jnp.array(train_x_3d[:1]))
+    params = variables["params"]
 
     optimizer = optax.adam(learning_rate=learning_rate)
     opt_state = optimizer.init(params)
@@ -263,64 +266,81 @@ def train_attention_deepsets(
         params = optax.apply_updates(params, updates)
         return params, opt_state, loss
 
+    train_x_j = jnp.array(train_x_3d)
+    train_y_j = jnp.array(train_y.astype(np.int32))
+    val_x_j = jnp.array(val_x_3d)
+    val_y_j = jnp.array(val_y.astype(np.int32))
+    test_x_j = jnp.array(test_x_3d)
+    test_y_j = jnp.array(test_y.astype(np.int32))
+
     best_val_acc = -1.0
     best_epoch = -1
     best_params = params
 
-    train_x_j = jnp.array(train_x_3d)
-    train_y_j = jnp.array(train_y)
-    val_x_j = jnp.array(val_x_3d)
-    val_y_j = jnp.array(val_y)
-    test_x_j = jnp.array(test_x_3d)
-    test_y_j = jnp.array(test_y)
-
-    n = int(train_x_3d.shape[0])
-    if n % batch_size != 0:
-        raise ValueError("batch_size이 전체 샘플 수를 정확히 나눠야 합니다.")
-    num_batches = n // batch_size
-
-    for epoch in range(1, epochs + 1):
+    for epoch in range(epochs):
         shuffle_key = jax.random.PRNGKey(make_subseed(rng_pack["subseed"], "shuffle", epoch))
-        perm = jax.random.permutation(shuffle_key, n)
-        xs = train_x_j[perm]
-        ys = train_y_j[perm]
+        perm = jax.random.permutation(shuffle_key, train_x_3d.shape[0])
+        xs = jnp.array(train_x_3d)[perm]
+        ys = jnp.array(train_y.astype(np.int32))[perm]
 
         if use_augmentation:
             epoch_key = jax.random.fold_in(rng_pack["base_key"], epoch)
-            xs_aug = augment_batch_3d(xs, epoch_key, rng_pack["scipy_rs"], sigma=sigma, is_training=True)
+            current_train_x_3d = augment_batch_3d(
+                xs,
+                epoch_key,
+                rng_pack["scipy_rs"],
+                sigma=sigma,
+                is_training=True,
+            )
         else:
-            xs_aug = xs
+            current_train_x_3d = xs
+
+        batch_size_total = len(current_train_x_3d)
+        assert batch_size_total % batch_size == 0
+
+        num_batches = batch_size_total // batch_size
+        current_train_x_batched = current_train_x_3d.reshape(num_batches, batch_size, -1, 3)
+        train_y_batched = ys.reshape(num_batches, batch_size)
 
         epoch_loss = 0.0
-        for b in range(num_batches):
-            start = b * batch_size
-            end = start + batch_size
-            batch_x = xs_aug[start:end]
-            batch_y = ys[start:end]
-            params, opt_state, loss = train_step(params, opt_state, batch_x, batch_y)
-            epoch_loss += float(loss) / num_batches
+        for i in range(num_batches):
+            params, opt_state, loss = train_step(
+                params,
+                opt_state,
+                current_train_x_batched[i],
+                train_y_batched[i],
+            )
+            epoch_loss += loss
+        avg_train_loss = float(epoch_loss) / num_batches
 
-        train_loss = float(eval_loss(params, train_x_j, train_y_j, model))
-        val_loss = float(eval_loss(params, val_x_j, val_y_j, model))
-        val_acc = float(eval_acc(params, val_x_j, val_y_j, model))
+        val_loss = float(ce_loss(params, val_x_j, val_y_j, model))
+        val_acc = float(accuracy_fn(params, val_x_j, val_y_j, model))
 
         if val_acc >= best_val_acc:
             best_val_acc = val_acc
-            best_epoch = epoch - 1
+            best_epoch = epoch
             best_params = jax.tree_util.tree_map(lambda x: x.copy(), params)
 
-        print(f"epoch {epoch-1}/{epochs-1} | train loss : {train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
-        _metrics_write({"epoch": int(epoch-1), "train_loss": float(train_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
+        print(
+            f"epoch {epoch}/{epochs-1} | train loss : {avg_train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}"
+        )
+        _metrics_write(
+            {
+                "epoch": int(epoch),
+                "train_loss": float(avg_train_loss),
+                "val_loss": float(val_loss),
+                "val_acc": float(val_acc),
+            }
+        )
 
-    test_acc = float(eval_acc(best_params, test_x_j, test_y_j, model))
+    final_test_acc = float(accuracy_fn(best_params, test_x_j, test_y_j, model))
 
     print("\n==============================")
     print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val_acc:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
+    print(f"Test Acc (evaluated ONCE with best-val params) = {final_test_acc:.4f}")
     print("==============================\n")
-    _metrics_write({"final": True, "best_epoch": int(best_epoch), "best_val_acc": float(best_val_acc), "test_acc": float(test_acc)})
 
-    return best_params, model, best_epoch, best_val_acc, test_acc
+    return best_params, model, best_epoch, best_val_acc, final_test_acc
 
 
 def normalize_variant(variant: str) -> str:
@@ -342,7 +362,7 @@ def resolve_dataset(dataset: str, num_points: int):
         return "modelnet", f"modelnet40_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
     if d == "shapenet":
         return "shapenet", f"shapenet_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
-    if d in {"suo"}:
+    if d in {"suo", "scan"}:
         return "SUO", f"SUO_3classes_{num_points}_1_fps_train700_val100_test200_new.npz", 3, 0.01
     raise ValueError("dataset must be one of: modelnet, shapenet, suo")
 
@@ -358,13 +378,14 @@ def main():
     base_seed = args.seed
     num_points = args.num_points
     model_variant = normalize_variant(args.variant)
-    dataset_tag, npz_name, num_classes, sigma = resolve_dataset(args.dataset, num_points)
 
     epochs = 1000
     lr = 0.0001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)
     print(f"seed={base_seed}, dataset={args.dataset}, variant={model_variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
+
+    dataset_tag, npz_name, num_classes, sigma = resolve_dataset(args.dataset, num_points)
 
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parent
@@ -378,8 +399,6 @@ def main():
         dataset_path = REPO / "data" / "Sydney_Urban_Objects" / npz_name
 
     dataset = np.load(dataset_path)
-
-    print("jax_enable_x64=True")
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
 
