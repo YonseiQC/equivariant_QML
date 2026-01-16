@@ -474,11 +474,11 @@ def run_experiment(
         model.load_state_dict(best_state_dict)
     test_acc = evaluate_accuracy(model, test_loader, device)
 
-    print("\n==============================")
-    print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
-    _metrics_write({"event": "end", "test_acc": float(test_acc)})
-    print("==============================\n")
+    print("\n=== Results ===")
+    print(f"Test Accuracy: {float(overall):.4f}")
+    print("Class-wise Accuracy:")
+    for i, acc in enumerate(cls_accs):
+        print(f"  Class {i}: {acc:.4f}")
 
     return test_acc
 
