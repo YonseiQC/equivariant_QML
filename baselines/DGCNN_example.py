@@ -391,7 +391,6 @@ def train_one_epoch(model, train_loader, optimizer, device):
 
 
 @torch.no_grad()
-@torch.no_grad()
 def evaluate_loss(model, loader, device):
     model.eval()
     total = 0.0
