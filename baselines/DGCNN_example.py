@@ -6,6 +6,7 @@ import json
 import atexit
 import datetime
 
+
 _METRICS_FH = None
 
 class _Tee:
@@ -105,6 +106,7 @@ import torch.nn.functional as F
 from scipy.stats import special_ortho_group
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
+from sklearn.metrics import confusion_matrix
 
 
 # ====================== Determinism & RNG pack ======================
@@ -195,6 +197,21 @@ def get_graph_feature(x, k, idx=None):
 
 def count_parameters(model):
     return sum(p.numel() for p in model.parameters() if p.requires_grad)
+
+
+def calculate_final_metrics(y_true, y_pred, num_classes_):
+    y_true_np = np.array(y_true).flatten()
+    y_pred_np = np.array(y_pred).flatten()
+    cm = confusion_matrix(y_true_np, y_pred_np, labels=range(num_classes_))
+    class_accuracies = []
+    for i in range(num_classes_):
+        denom = np.sum(cm[i, :])
+        if denom > 0:
+            class_accuracies.append(cm[i, i] / denom)
+        else:
+            class_accuracies.append(0.0)
+    overall_accuracy = np.trace(cm) / np.sum(cm) if np.sum(cm) > 0 else 0.0
+    return cm, class_accuracies, overall_accuracy
 
 
 # ---- Augmentation: Jitter -> Rotation -> Permutation ----
@@ -472,15 +489,41 @@ def run_experiment(
 
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
-    test_acc = evaluate_accuracy(model, test_loader, device)
+
+    y_true = []
+    y_pred = []
+
+    model.eval()
+    for data, label in test_loader:
+        data = data.to(device)
+        label = label.squeeze().to(device)
+        out = model(data)
+        pred = out.argmax(dim=1)
+        y_true.append(label.detach().cpu().numpy())
+        y_pred.append(pred.detach().cpu().numpy())
+
+    y_true = np.concatenate(y_true, axis=0)
+    y_pred = np.concatenate(y_pred, axis=0)
+
+    cm, cls_accs, overall = calculate_final_metrics(y_true, y_pred, num_classes)
 
     print("\n=== Results ===")
-    print(f"Test Accuracy: {float(test_acc):.4f}")
+    print(f"Test Accuracy: {float(overall):.4f}")
     print("Class-wise Accuracy:")
     for i, acc in enumerate(cls_accs):
-        print(f"  Class {i}: {acc:.4f}")
+        print(f"  Class {i}: {float(acc):.4f}")
 
-    return test_acc
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch - 1),
+            "best_val_acc": float(best_val),
+            "test_acc": float(overall),
+            "class_acc": [float(a) for a in cls_accs],
+        }
+    )
+
+    return float(overall)
 
 
 def normalize_variant(variant: str) -> str:
