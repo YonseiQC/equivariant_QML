@@ -422,7 +422,7 @@ def run_experiment(
     torch_gen = rng["torch_gen_cpu"]
 
     if not os.path.exists(dataset_file):
-        raise FileNotFoundError(f"데이터셋 파일 '{dataset_file}'이 존재하지 않습니다.")
+        raise FileNotFoundError(f"'{dataset_file}' does not exist.")
 
     train_dataset = PointCloudDataset(
         dataset_file, num_points=num_points, split="train", sigma=sigma, np_gen=rng["np_gen"], np_rs=rng["np_rs"]
@@ -440,7 +440,7 @@ def run_experiment(
 
     if k >= num_points:
         k = max(1, num_points)
-        print(f"k값을 {k}로 조정했습니다 (num_points={num_points})")
+        print(f"{k} changes to {num_points}")
 
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -449,10 +449,6 @@ def run_experiment(
 
     model = CompactDGCNN(num_classes=num_classes, k=k, dropout=dropout, **model_cfg).to(device)
     total_params = count_parameters(model)
-
-    print(f"Compact DGCNN total parameters: {total_params:,}")
-    print(f"데이터셋 크기: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
-    print(f"Data Aug: Jitter(σ={sigma}) + Rotation + Permutation")
 
     optimizer = Adam(model.parameters(), lr=lr, weight_decay=0)
 
@@ -555,7 +551,7 @@ def main():
         model_cfg,
         num_classes=num_classes,
         batch_size=35,
-        epochs=1000,
+        epochs=3,
         lr=0.01,
         dropout=0.0,
         sigma=sigma,
