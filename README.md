@@ -188,7 +188,19 @@ Example:
 python baselines/DGCNN.py 2026 --dataset modelnet --num_points 6 --variant light --k 3
 ```
 
-Each script prints validation progress and reports the final Test Overall Accuracy at the end.
+### Output Results
+Each run prints:
+- an initial header with `seed`, `dataset`, `variant`, `num_points` (or `num_qubit`), `epochs`, and `lr`
+- per-epoch logs in the format:
+  `epoch E/T | train loss : ... | val loss : ... | val accuracy : ...`
+- a final summary including final test accuracy and class-wise Accuracy
+
+During training/evaluation, the script saves:
+- Contains: combined console log (stdout/stderr), run config dump, and per-epoch/final metrics.
+- Filenames: `<model>_<seed>_<dataset>_<num_points>_<variant>[_<k>].stdout.log`, `.config.json`, `.metrics.jsonl`.
+- Saved to: repository root (`Equivariant_QML/`, i.e., the directory containing `data/`).
+
+
 
 
 ---
