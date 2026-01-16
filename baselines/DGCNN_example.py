@@ -193,11 +193,7 @@ def get_graph_feature(x, k, idx=None):
 
     feature = torch.cat((feature - x, x), dim=3).permute(0, 3, 1, 2)
     return feature
-
-
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
+    
 
 def calculate_final_metrics(y_true, y_pred, num_classes_):
     y_true_np = np.array(y_true).flatten()
@@ -464,7 +460,7 @@ def run_experiment(
         torch.cuda.manual_seed_all(seed)
 
     model = CompactDGCNN(num_classes=num_classes, k=k, dropout=dropout, **model_cfg).to(device)
-    total_params = count_parameters(model)
+
 
     optimizer = Adam(model.parameters(), lr=lr, weight_decay=0)
 
