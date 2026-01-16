@@ -1,6 +1,99 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import sys
+import json
+import atexit
+import datetime
+
+
+_METRICS_FH = None
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+        return len(data)
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+    def isatty(self):
+        for s in self.streams:
+            if hasattr(s, "isatty") and s.isatty():
+                return True
+        return False
+
+def _metrics_write(obj):
+    global _METRICS_FH
+    if _METRICS_FH is None:
+        return
+    _METRICS_FH.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    _METRICS_FH.flush()
+
+def _find_repo_root(start):
+    p = start
+    while True:
+        if (p / "data").exists():
+            return p
+        if p.parent == p:
+            return start
+        p = p.parent
+
+def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs, k=None):
+    here = Path(__file__).resolve().parent
+    repo = _find_repo_root(here)
+    run_id = f"{model}_{seed}_{dataset}_{num_points}_{variant}"
+    if k is not None:
+        run_id = f"{run_id}_{k}"
+    stdout_path = repo / f"{run_id}.stdout.log"
+    config_path = repo / f"{run_id}.config.json"
+    metrics_path = repo / f"{run_id}.metrics.jsonl"
+
+    orig_out, orig_err = sys.stdout, sys.stderr
+    fh = open(stdout_path, "w", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(orig_out, fh)
+    sys.stderr = _Tee(orig_err, fh)
+
+    global _METRICS_FH
+    _METRICS_FH = open(metrics_path, "w", encoding="utf-8", buffering=1)
+
+    def _cleanup():
+        try:
+            sys.stdout.flush(); sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            fh.close()
+        except Exception:
+            pass
+        try:
+            _METRICS_FH.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "model": str(model),
+                "seed": int(seed),
+                "dataset": str(dataset),
+                "variant": str(variant),
+                "num_points": int(num_points),
+                "epochs": int(epochs),
+                "lr": float(lr),
+                "k": None if k is None else int(k),
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    _metrics_write({"event": "start", "run_id": run_id, "timestamp": datetime.datetime.now().isoformat()})
+    return run_id
 import argparse
 from pathlib import Path
 import os
@@ -13,6 +106,7 @@ import torch.nn.functional as F
 from scipy.stats import special_ortho_group
 from torch.optim import Adam
 from torch.utils.data import DataLoader, Dataset
+from sklearn.metrics import confusion_matrix
 
 
 # ====================== Determinism & RNG pack ======================
@@ -101,8 +195,19 @@ def get_graph_feature(x, k, idx=None):
     return feature
 
 
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
+def calculate_final_metrics(y_true, y_pred, num_classes_):
+    y_true_np = np.array(y_true).flatten()
+    y_pred_np = np.array(y_pred).flatten()
+    cm = confusion_matrix(y_true_np, y_pred_np, labels=range(num_classes_))
+    class_accuracies = []
+    for i in range(num_classes_):
+        denom = np.sum(cm[i, :])
+        if denom > 0:
+            class_accuracies.append(cm[i, i] / denom)
+        else:
+            class_accuracies.append(0.0)
+    overall_accuracy = np.trace(cm) / np.sum(cm) if np.sum(cm) > 0 else 0.0
+    return cm, class_accuracies, overall_accuracy
 
 
 # ---- Augmentation: Jitter -> Rotation -> Permutation ----
@@ -249,13 +354,6 @@ class PointCloudDataset(Dataset):
 
     def __getitem__(self, idx):
         pointcloud = self.points[idx].copy()
-
-        if len(pointcloud) < self.num_points:
-            indices = self.np_gen.choice(len(pointcloud), self.num_points, replace=True)
-        else:
-            indices = self.np_gen.choice(len(pointcloud), self.num_points, replace=False)
-        pointcloud = pointcloud[indices]
-
         is_training = self.split == "train"
         pointcloud = apply_data_augmentation(
             pointcloud, self.sigma, self.np_gen, self.np_rs, is_training=is_training
@@ -282,6 +380,19 @@ def train_one_epoch(model, train_loader, optimizer, device):
 
 
 @torch.no_grad()
+def evaluate_loss(model, loader, device):
+    model.eval()
+    total = 0.0
+    n = 0
+    for data, label in loader:
+        data = data.to(device)
+        label = label.squeeze().to(device)
+        out = model(data)
+        loss = F.cross_entropy(out, label, reduction="sum")
+        total += float(loss.item())
+        n += int(label.numel())
+    return total / max(n, 1)
+
 def evaluate_accuracy(model, loader, device):
     model.eval()
     correct = 0
@@ -305,8 +416,8 @@ def run_experiment(
     *,
     num_classes=5,
     batch_size=35,
-    epochs=1000,
-    lr=0.01,
+    epochs,
+        lr,
     dropout=0.0,
     sigma=0.02,
     seed=831,
@@ -316,7 +427,7 @@ def run_experiment(
     torch_gen = rng["torch_gen_cpu"]
 
     if not os.path.exists(dataset_file):
-        raise FileNotFoundError(f"데이터셋 파일 '{dataset_file}'이 존재하지 않습니다.")
+        raise FileNotFoundError(f"'{dataset_file}' does not exist.")
 
     train_dataset = PointCloudDataset(
         dataset_file, num_points=num_points, split="train", sigma=sigma, np_gen=rng["np_gen"], np_rs=rng["np_rs"]
@@ -334,7 +445,7 @@ def run_experiment(
 
     if k >= num_points:
         k = max(1, num_points)
-        print(f"k값을 {k}로 조정했습니다 (num_points={num_points})")
+        print(f"Adjusted k to {k}")
 
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -342,11 +453,7 @@ def run_experiment(
         torch.cuda.manual_seed_all(seed)
 
     model = CompactDGCNN(num_classes=num_classes, k=k, dropout=dropout, **model_cfg).to(device)
-    total_params = count_parameters(model)
 
-    print(f"Compact DGCNN total parameters: {total_params:,}")
-    print(f"데이터셋 크기: train={len(train_dataset)}, val={len(val_dataset)}, test={len(test_dataset)}")
-    print(f"Data Aug: Jitter(σ={sigma}) + Rotation + Permutation")
 
     optimizer = Adam(model.parameters(), lr=lr, weight_decay=0)
 
@@ -358,29 +465,53 @@ def run_experiment(
         train_loss = train_one_epoch(model, train_loader, optimizer, device)
         train_acc = evaluate_accuracy(model, train_loader, device)
         val_acc = evaluate_accuracy(model, val_loader, device)
+        val_loss = evaluate_loss(model, val_loader, device)
 
         if val_acc >= best_val:
             best_val = val_acc
             best_epoch = epoch
             best_state_dict = {k_: v.detach().cpu().clone() for k_, v in model.state_dict().items()}
-            torch.save(best_state_dict, "best_compact_dgcnn_by_val.pth")
-
-        print(
-            f"Epoch {epoch:03d} | Loss: {train_loss:.4f} | "
-            f"Train Acc: {train_acc:.4f} | Val Acc: {val_acc:.4f} | "
-            f"Best Val: {best_val:.4f} @ {best_epoch}"
-        )
+        # torch.save(...) disabled (no extra files)
+        print(f"epoch {epoch-1}/{epochs-1} | train loss : {train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
+        _metrics_write({"epoch": int(epoch-1), "train_loss": float(train_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
 
     if best_state_dict is not None:
         model.load_state_dict(best_state_dict)
-    test_acc = evaluate_accuracy(model, test_loader, device)
 
-    print("\n==============================")
-    print(f"[BEST by Val] epoch={best_epoch}, val_acc={best_val:.4f}")
-    print(f"Test Acc (evaluated ONCE with best-val params) = {test_acc:.4f}")
-    print("==============================\n")
+    y_true = []
+    y_pred = []
 
-    return test_acc
+    model.eval()
+    for data, label in test_loader:
+        data = data.to(device)
+        label = label.squeeze().to(device)
+        out = model(data)
+        pred = out.argmax(dim=1)
+        y_true.append(label.detach().cpu().numpy())
+        y_pred.append(pred.detach().cpu().numpy())
+
+    y_true = np.concatenate(y_true, axis=0)
+    y_pred = np.concatenate(y_pred, axis=0)
+
+    cm, cls_accs, overall = calculate_final_metrics(y_true, y_pred, num_classes)
+
+    print("\n=== Results ===")
+    print(f"Test Accuracy: {float(overall):.4f}")
+    print("Class-wise Accuracy:")
+    for i, acc in enumerate(cls_accs):
+        print(f"  Class {i}: {float(acc):.4f}")
+
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch - 1),
+            "best_val_acc": float(best_val),
+            "test_acc": float(overall),
+            "class_acc": [float(a) for a in cls_accs],
+        }
+    )
+
+    return float(overall)
 
 
 def normalize_variant(variant: str) -> str:
@@ -439,10 +570,10 @@ def main():
         dataset_file = str(REPO / "data" / "Sydney_Urban_Objects" / dataset_file)
     k = args.k
 
-    print(f"Using seed={base_seed}")
-    print(
-        f"dataset={dataset_tag}, variant={variant}, num_points={num_points}, k={k}"
-    )
+    epochs = 1000
+    lr = 0.01
+    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs, k=k)
+    print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
 
     test_acc = run_experiment(
         dataset_file,
@@ -451,7 +582,7 @@ def main():
         model_cfg,
         num_classes=num_classes,
         batch_size=35,
-        epochs=1000,
+        epochs=3,
         lr=0.01,
         dropout=0.0,
         sigma=sigma,

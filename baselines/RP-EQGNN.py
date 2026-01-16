@@ -4,7 +4,6 @@
 import argparse
 from pathlib import Path
 import hashlib
-import math
 
 import jax
 import jax.numpy as jnp
@@ -14,10 +13,102 @@ import pennylane as qml
 from flax import linen as nn
 from sklearn.metrics import confusion_matrix
 
+import sys
+import json
+import atexit
+import datetime
+
 jax.config.update("jax_enable_x64", True)
 
+_METRICS_FH = None
 
-# ---------------- RNG ----------------
+
+class _Tee:
+    def __init__(self, *streams):
+        self.streams = streams
+    def write(self, data):
+        for s in self.streams:
+            s.write(data)
+        return len(data)
+    def flush(self):
+        for s in self.streams:
+            s.flush()
+    def isatty(self):
+        for s in self.streams:
+            if hasattr(s, "isatty") and s.isatty():
+                return True
+        return False
+
+
+def _metrics_write(obj):
+    global _METRICS_FH
+    if _METRICS_FH is None:
+        return
+    _METRICS_FH.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    _METRICS_FH.flush()
+
+
+def _find_repo_root(start):
+    p = start
+    while True:
+        if (p / "data").exists():
+            return p
+        if p.parent == p:
+            return start
+        p = p.parent
+
+
+def _setup_run(model, seed, dataset, num_points, variant, *, lr, epochs):
+    here = Path(__file__).resolve().parent
+    repo = _find_repo_root(here)
+    run_id = f"{model}_{seed}_{dataset}_{num_points}_{variant}"
+    stdout_path = repo / f"{run_id}.stdout.log"
+    config_path = repo / f"{run_id}.config.json"
+    metrics_path = repo / f"{run_id}.metrics.jsonl"
+
+    orig_out, orig_err = sys.stdout, sys.stderr
+    fh = open(stdout_path, "w", encoding="utf-8", buffering=1)
+    sys.stdout = _Tee(orig_out, fh)
+    sys.stderr = _Tee(orig_err, fh)
+
+    global _METRICS_FH
+    _METRICS_FH = open(metrics_path, "w", encoding="utf-8", buffering=1)
+
+    def _cleanup():
+        try:
+            sys.stdout.flush(); sys.stderr.flush()
+        except Exception:
+            pass
+        try:
+            fh.close()
+        except Exception:
+            pass
+        try:
+            _METRICS_FH.close()
+        except Exception:
+            pass
+
+    atexit.register(_cleanup)
+
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "model": str(model),
+                "seed": int(seed),
+                "dataset": str(dataset),
+                "variant": str(variant),
+                "num_points": int(num_points),
+                "epochs": int(epochs),
+                "lr": float(lr),
+                "timestamp": datetime.datetime.now().isoformat(),
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
+    _metrics_write({"event": "start", "run_id": run_id, "timestamp": datetime.datetime.now().isoformat()})
+    return run_id
+
 
 def make_subseed(base_seed: int, *keys) -> int:
     h = hashlib.sha256(str((base_seed,) + tuple(keys)).encode()).hexdigest()
@@ -29,8 +120,6 @@ def make_rng_pack(base_seed: int, num_point: int, dataset_tag: str):
     base_key = jax.random.PRNGKey(subseed)
     return dict(subseed=subseed, base_key=base_key)
 
-
-# ---------------- Utils ----------------
 
 def ensure_points_dim(x: np.ndarray):
     if x.ndim != 3:
@@ -107,23 +196,12 @@ def augment_batch(batch_points, key, sigma, is_training: bool):
     return jax.vmap(augment_one, in_axes=(0, 0, None))(batch_points, keys, sigma)
 
 
-def rot_perm_only(points, key):
-    k2, k3 = jax.random.split(key, 2)
-    R = random_rotation_matrix(k2)
-    pts = points @ R.T
-    idx = jax.random.permutation(k3, pts.shape[0])
-    pts = pts[idx]
-    return pts
-
-
 def make_global_z_obs(num_qubits: int):
     obs = qml.PauliZ(0)
     for i in range(1, num_qubits):
         obs = obs @ qml.PauliZ(i)
     return obs
 
-
-# ---------------- Head ----------------
 
 class RPHead(nn.Module):
     num_classes: int
@@ -144,14 +222,11 @@ class RPHead(nn.Module):
         return x
 
 
-# ---------------- QNODE ----------------
-
 def build_rpeqgnn_qnode(num_points: int, depth: int = 2):
     num_qubits = num_points
     dev = qml.device("default.qubit", wires=num_qubits)
 
     edge_feat_fn, edge_pairs, E = make_edge_feature_fn(num_points)
-    pair_to_idx = {(u, w): idx for idx, (u, w) in enumerate(edge_pairs)}
 
     L_enc = 3 * num_points
     L_node = num_points
@@ -202,8 +277,6 @@ def build_rpeqgnn_qnode(num_points: int, depth: int = 2):
     return qnode_batched, edge_feat_fn, L_vec, dim_w_total
 
 
-# ---------------- Metrics ----------------
-
 def calculate_final_metrics(y_true, y_pred, num_classes):
     y_true_np = np.asarray(y_true).flatten()
     y_pred_np = np.asarray(y_pred).flatten()
@@ -212,14 +285,12 @@ def calculate_final_metrics(y_true, y_pred, num_classes):
     for i in range(num_classes):
         denom = cm[i].sum()
         class_accs.append(cm[i, i] / denom if denom > 0 else 0.0)
-    overall_acc = np.trace(cm) / np.sum(cm)
-    return cm, class_accs, overall_acc
+    overall_acc = np.trace(cm) / np.sum(cm) if np.sum(cm) > 0 else 0.0
+    return cm, class_accs, float(overall_acc)
 
-
-# ---------------- Build model ----------------
 
 def build_model(num_points: int, num_classes: int, depth: int = 2, variant: str = "light"):
-    qnode_batched, edge_feat_fn, L_vec, dim_w_total = build_rpeqgnn_qnode(num_points, depth=depth)
+    qnode_batched, edge_feat_fn, _, dim_w_total = build_rpeqgnn_qnode(num_points, depth=depth)
     head = RPHead(num_classes=num_classes, variant=variant)
 
     def build_input_vec(points: jnp.ndarray) -> jnp.ndarray:
@@ -247,8 +318,6 @@ def build_model(num_points: int, num_classes: int, depth: int = 2, variant: str 
     return init_params, jax.jit(forward)
 
 
-# ---------------- Training ----------------
-
 def train_rpeqgnn(
     train_x: np.ndarray,
     train_y: np.ndarray,
@@ -272,7 +341,6 @@ def train_rpeqgnn(
     train_x = ensure_points_dim(train_x)
     val_x = ensure_points_dim(val_x)
     test_x = ensure_points_dim(test_x)
-
     assert train_x.shape[1] == num_points
 
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
@@ -282,47 +350,36 @@ def train_rpeqgnn(
     init_params, forward = build_model(num_points, num_classes, depth=depth, variant=variant)
     params = init_params(jax.random.fold_in(base_key, 0))
 
-    quantum_param_count = int(params["quantum"].size)
-    head_param_count = int(sum(p.size for p in jax.tree.leaves(params["head"])))
-    total_param_count = quantum_param_count + head_param_count
-    print(
-        f"[{dataset_tag}] Param count: quantum={quantum_param_count}, "
-        f"head={head_param_count}, total={total_param_count}"
-    )
-
-    debug_pts = jnp.array(train_x[0:1].astype(np.float64))
-    debug_key = jax.random.fold_in(base_key, 999)
-    debug_rot = rot_perm_only(debug_pts[0], debug_key).reshape(1, num_points, 3)
-    logits_orig = forward(params, debug_pts)
-    logits_rot = forward(params, debug_rot)
-    print(f"[{dataset_tag}] Invariance logits (orig): {np.array(logits_orig)}")
-    print(f"[{dataset_tag}] Invariance logits (rot+perm): {np.array(logits_rot)}")
-
-    def loss_fn(params, x_batch, y_batch):
+    def loss_fn(params_, x_batch, y_batch):
         if y_batch.ndim > 1:
             y_batch = jnp.squeeze(y_batch)
-        logits = forward(params, x_batch)
+        logits = forward(params_, x_batch)
         loss = jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y_batch))
         return loss
 
     @jax.jit
-    def loss_and_grad(params, x_batch, y_batch):
-        return jax.value_and_grad(loss_fn)(params, x_batch, y_batch)
+    def loss_and_grad(params_, x_batch, y_batch):
+        return jax.value_and_grad(loss_fn)(params_, x_batch, y_batch)
 
     @jax.jit
-    def accuracy(params, x_all, y_all):
-        logits = forward(params, x_all)
+    def accuracy(params_, x_all, y_all):
+        logits = forward(params_, x_all)
         preds = jnp.argmax(logits, axis=-1)
         return jnp.mean((preds == y_all).astype(jnp.float32))
 
-    optimizer = optax.adam(learning_rate)
+    @jax.jit
+    def eval_loss(params_, x_all, y_all):
+        logits = forward(params_, x_all)
+        return jnp.mean(optax.softmax_cross_entropy_with_integer_labels(logits, y_all))
+
+    optimizer = optax.adamw(learning_rate=learning_rate, weight_decay=weight_decay) if weight_decay > 0 else optax.adam(learning_rate)
     opt_state = optimizer.init(params)
 
     num_train = train_x.shape[0]
     assert num_train % batch_size == 0
     num_batches = num_train // batch_size
 
-    best_val_acc = -1.0
+    best_val_acc = 0.0
     best_epoch = -1
     best_params = params
 
@@ -350,24 +407,39 @@ def train_rpeqgnn(
             params = optax.apply_updates(params, updates)
             epoch_loss += float(loss_val) / num_batches
 
+        val_loss = float(eval_loss(params, val_x_j, val_y_j))
         val_acc = float(accuracy(params, val_x_j, val_y_j))
-        print(
-            f"[{dataset_tag}] seed={base_seed} "
-            f"epoch={epoch}/{num_epochs} loss={epoch_loss:.4f} val_acc={val_acc:.4f}"
-        )
+
+        e0 = epoch - 1
+        print(f"epoch {e0}/{num_epochs-1} | train loss : {epoch_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
+        _metrics_write({"epoch": int(e0), "train_loss": float(epoch_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
 
         if val_acc >= best_val_acc:
-            best_val_acc = val_acc
-            best_epoch = epoch
+            best_val_acc = float(val_acc)
+            best_epoch = int(e0)
             best_params = params
-
-    print(f"[{dataset_tag}] Best val_acc={best_val_acc:.4f} @ epoch {best_epoch}")
 
     test_logits = forward(best_params, test_x_j)
     test_preds = jnp.argmax(test_logits, axis=-1)
-    _, _, test_acc = calculate_final_metrics(np.array(test_y_j), np.array(test_preds), num_classes)
-    print(f"[{dataset_tag}] Test acc @ best_val: {test_acc:.4f}")
-    return best_val_acc, test_acc
+    _, class_acc, test_acc = calculate_final_metrics(np.array(test_y_j), np.array(test_preds), num_classes)
+
+    print("\n=== Results ===")
+    print(f"Test Accuracy: {float(test_acc):.4f}")
+    print("Class-wise Accuracy:")
+    for i, a in enumerate(class_acc):
+        print(f"  Class {i}: {float(a):.4f}")
+
+    _metrics_write(
+        {
+            "final": True,
+            "best_epoch": int(best_epoch),
+            "best_val_acc": float(best_val_acc),
+            "test_acc": float(test_acc),
+            "class_acc": [float(a) for a in class_acc],
+        }
+    )
+
+    return float(best_val_acc), float(test_acc)
 
 
 def normalize_variant(variant: str) -> str:
@@ -402,10 +474,17 @@ def main():
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
     args = parser.parse_args()
 
-    base_seed = args.seed
-    num_points = args.num_points
+    base_seed = int(args.seed)
+    num_points = int(args.num_points)
     variant = normalize_variant(args.variant)
     dataset_tag, dataset_file, num_classes, sigma = resolve_dataset(args.dataset, num_points)
+
+    epochs = 3
+    lr = 1e-3
+
+    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs)
+    print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
+
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parent
 
@@ -425,13 +504,7 @@ def main():
     test_x = data["test_dataset_x"].astype(np.float64)
     test_y = data["test_dataset_y"].astype(np.int32)
 
-    print(f"Using seed={base_seed}")
-    print(
-        f"dataset={dataset_tag}, variant={variant}, num_points={num_points}"
-    )
-    print("jax_enable_x64=True")
-
-    best_val, test_acc = train_rpeqgnn(
+    test_acc = train_rpeqgnn(
         train_x,
         train_y,
         val_x,
@@ -442,17 +515,16 @@ def main():
         num_classes=num_classes,
         base_seed=base_seed,
         dataset_tag=dataset_tag,
-        num_epochs=1000,
+        num_epochs=epochs,
         batch_size=35,
-        learning_rate=1e-3,
+        learning_rate=lr,
         weight_decay=0.0,
         use_augmentation=True,
         depth=50,
         variant=variant,
         sigma=sigma,
-    )
+    )[1]
 
-    print(f"[{dataset_tag}] BEST Val={best_val:.4f} | Test={test_acc:.4f}")
     print(float(test_acc))
 
 
