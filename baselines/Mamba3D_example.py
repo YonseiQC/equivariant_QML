@@ -595,9 +595,6 @@ def main():
     dataset = np.load(dataset_file)
     rng_pack = make_rng_pack(base_seed, num_points, dataset_tag)
 
-    print(f"Using seed={base_seed}")
-    print(f"dataset={dataset_tag}, variant={variant}, num_points={num_points}, sigma={sigma}")
-
     test_acc = train_compact_mamba3d(
         dataset,
         batch_size=35,
