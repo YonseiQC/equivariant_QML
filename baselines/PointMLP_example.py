@@ -164,16 +164,6 @@ def knn(x, k):
     idx = pairwise_distance.topk(k=k, dim=-1)[1]
     return idx
 
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-def print_param_report(model, title="Model"):
-    total = count_parameters(model)
-    print(f"{title} trainable params: {total/1e6:.3f}M ({total:,})")
-    for name, module in model.named_children():
-        p = count_parameters(module)
-        print(f"  - {name:12s}: {p/1e6:.3f}M ({p:,})")
-
 def calculate_final_metrics(y_true, y_pred, num_classes_):
     y_true_np = np.array(y_true).flatten()
     y_pred_np = np.array(y_pred).flatten()
@@ -527,7 +517,6 @@ def run_experiment(
         torch.cuda.manual_seed_all(seed)
 
     model = CompactPointMLP(num_classes=num_classes, k=k, variant=variant).to(device)
-    print_param_report(model, title="CompactPointMLP")
 
     optimizer = Adam(model.parameters(), lr=lr)
 
@@ -641,9 +630,6 @@ def main():
         dataset_file = str(REPO / "data" / "Sydney_Urban_Objects" / dataset_file)
 
     k = args.k
-
-    print(f"Using seed={base_seed}")
-    print(f"dataset={dataset_tag}, variant={variant}, num_points={num_points}, k={k}")
 
     test_acc = run_experiment(
         dataset_file,
