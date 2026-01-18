@@ -574,7 +574,7 @@ def main():
     dataset_tag, dataset_file, sigma = resolve_dataset(args.dataset, num_points)
 
     epochs = 1000
-    lr = 0.01
+    lr = 0.001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs)
     print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, epochs={epochs}, lr={lr}")
