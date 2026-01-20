@@ -177,16 +177,16 @@ class SimpleNN(nn.Module):
     def __call__(self, x):
         if self.variant == "mid":
             x = nn.Dense(features=8)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=16)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=32)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
         else:
             x = nn.Dense(features=4)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=4)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
 
         mean_pool = jnp.mean(x, axis=1)
         max_pool  = jnp.max(x, axis=1)
@@ -199,16 +199,16 @@ class SimpleNN(nn.Module):
 
         if self.variant == "mid":
             x = nn.Dense(features=32)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=16)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=8)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
         else:
             x = nn.Dense(features=24)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=24)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
 
         x = nn.Dense(features=self.num_classes)(x)
         return x
