@@ -180,16 +180,16 @@ class SimpleNN(nn.Module):
 
         if self.variant == "mid":
             x = nn.Dense(features=8)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=16)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=32)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
         else:
             x = nn.Dense(features=4)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=4)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
 
         mean_pool = jnp.mean(x, axis=1)
         max_pool = jnp.max(x, axis=1)
@@ -202,16 +202,16 @@ class SimpleNN(nn.Module):
 
         if self.variant == "mid":
             x = nn.Dense(features=32)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=16)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=8)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
         else:
             x = nn.Dense(features=24)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
             x = nn.Dense(features=24)(x)
-            x = nn.tanh(x)
+            x = nn.relu(x)
 
         x = nn.Dense(features=self.num_classes)(x)
         return x
@@ -406,7 +406,7 @@ def main():
     model_variant = normalize_variant(args.variant)
 
     epochs = 1000
-    lr = 0.001
+    lr = 0.01
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)
 
