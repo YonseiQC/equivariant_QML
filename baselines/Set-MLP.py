@@ -20,8 +20,6 @@ from scipy.stats import special_ortho_group
 from sklearn.metrics import confusion_matrix
 
 
-INIT_SCALE = 0.02
-
 _METRICS_FH = None
 
 
@@ -278,8 +276,7 @@ def train_attention_deepsets(
     test_y = dataset["test_dataset_y"]
 
     num_points = int(train_x_3d.shape[1])
-    init_scale = INIT_SCALE
-    init_u2 = float(init_scale * np.pi)
+    init_u2 = float(0.02 * np.pi)
 
     model = SimpleNN(variant=model_variant, num_classes=num_classes, init_u2=init_u2)
 
