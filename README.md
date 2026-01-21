@@ -9,7 +9,7 @@ HyQuRP is a hybrid quantum–classical neural network for 3D point clouds that m
 </p>
 
 ![figure](Image2.png)
-
+![figure](Image3.png)
 
 ---
 
