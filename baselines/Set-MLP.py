@@ -10,7 +10,6 @@ import atexit
 import datetime
 
 import jax
-jax.config.update("jax_enable_x64", True)
 
 import hashlib
 import jax.numpy as jnp
@@ -20,6 +19,8 @@ from flax import linen as nn
 from scipy.stats import special_ortho_group
 from sklearn.metrics import confusion_matrix
 
+
+INIT_SCALE = 0.02
 
 _METRICS_FH = None
 
@@ -42,6 +43,12 @@ class _Tee:
             if hasattr(s, "isatty") and s.isatty():
                 return True
         return False
+
+
+def param_init(scale: float):
+    def _init(key, shape, dtype=jnp.float32):
+        return jax.random.uniform(key, shape, dtype=dtype, minval=0, maxval=scale)
+    return _init
 
 
 def _metrics_write(obj):
@@ -172,24 +179,29 @@ def augment_batch_3d(batch_points, key, scipy_rs, sigma=0.02, is_training=True):
 class SimpleNN(nn.Module):
     variant: str
     num_classes: int
+    init_u2: float
 
     @nn.compact
     def __call__(self, x):
-        x = x.reshape(x.shape[0], -1)
-        x = jnp.expand_dims(x, axis=-1)
+        kinit = param_init(self.init_u2)
+        binit = param_init(self.init_u2)
 
         if self.variant == "mid":
-            x = nn.Dense(features=8)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=16)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=32)(x)
-            x = nn.relu(x)
+            x = nn.Dense(features=2, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=8, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=16, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=32, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
         else:
-            x = nn.Dense(features=4)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=4)(x)
-            x = nn.relu(x)
+            x = nn.Dense(features=2, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=4, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=4, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
 
         mean_pool = jnp.mean(x, axis=1)
         max_pool = jnp.max(x, axis=1)
@@ -201,19 +213,19 @@ class SimpleNN(nn.Module):
         x = jnp.concatenate([mean_pool, max_pool, min_pool, std_pool, sum_pool, var_pool], axis=-1)
 
         if self.variant == "mid":
-            x = nn.Dense(features=32)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=16)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=8)(x)
-            x = nn.relu(x)
+            x = nn.Dense(features=32, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=16, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=8, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
         else:
-            x = nn.Dense(features=24)(x)
-            x = nn.relu(x)
-            x = nn.Dense(features=24)(x)
-            x = nn.relu(x)
+            x = nn.Dense(features=24, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
+            x = nn.Dense(features=24, kernel_init=kinit, bias_init=binit)(x)
+            x = nn.tanh(x)
 
-        x = nn.Dense(features=self.num_classes)(x)
+        x = nn.Dense(features=self.num_classes, kernel_init=kinit, bias_init=binit)(x)
         return x
 
 
@@ -265,9 +277,14 @@ def train_attention_deepsets(
     test_x_3d = dataset["test_dataset_x"]
     test_y = dataset["test_dataset_y"]
 
-    model = SimpleNN(variant=model_variant, num_classes=num_classes)
+    num_points = int(train_x_3d.shape[1])
+    init_scale = INIT_SCALE
+    init_u2 = float(init_scale * np.pi)
 
-    variables = model.init(rng_pack["base_key"], jnp.array(train_x_3d[:1]))
+    model = SimpleNN(variant=model_variant, num_classes=num_classes, init_u2=init_u2)
+
+    ckey = jax.random.PRNGKey(make_subseed(rng_pack["subseed"], "init_c"))
+    variables = model.init(ckey, jnp.array(train_x_3d[:1]))
     params = variables["params"]
 
     optimizer = optax.adam(learning_rate=learning_rate)
@@ -301,13 +318,7 @@ def train_attention_deepsets(
 
         if use_augmentation:
             epoch_key = jax.random.fold_in(rng_pack["base_key"], epoch)
-            current_train_x_3d = augment_batch_3d(
-                xs,
-                epoch_key,
-                rng_pack["scipy_rs"],
-                sigma=sigma,
-                is_training=True,
-            )
+            current_train_x_3d = augment_batch_3d(xs, epoch_key, rng_pack["scipy_rs"], sigma=sigma, is_training=True)
         else:
             current_train_x_3d = xs
 
@@ -332,17 +343,8 @@ def train_attention_deepsets(
             best_epoch = epoch
             best_params = jax.tree_util.tree_map(lambda x: x.copy(), params)
 
-        print(
-            f"epoch {epoch}/{epochs-1} | train loss : {avg_train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}"
-        )
-        _metrics_write(
-            {
-                "epoch": int(epoch),
-                "train_loss": float(avg_train_loss),
-                "val_loss": float(val_loss),
-                "val_acc": float(val_acc),
-            }
-        )
+        print(f"epoch {epoch}/{epochs-1} | train loss : {avg_train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
+        _metrics_write({"epoch": int(epoch), "train_loss": float(avg_train_loss), "val_loss": float(val_loss), "val_acc": float(val_acc)})
 
     test_logits = model.apply({"params": best_params}, test_x_j)
     test_preds = np.array(jnp.argmax(test_logits, axis=-1)).astype(np.int32)
@@ -356,15 +358,7 @@ def train_attention_deepsets(
     for i, a in enumerate(class_acc):
         print(f"  Class {i}: {float(a):.4f}")
 
-    _metrics_write(
-        {
-            "final": True,
-            "best_epoch": int(best_epoch),
-            "best_val_acc": float(best_val_acc),
-            "test_acc": float(test_acc),
-            "class_acc": [float(a) for a in class_acc],
-        }
-    )
+    _metrics_write({"final": True, "best_epoch": int(best_epoch), "best_val_acc": float(best_val_acc), "test_acc": float(test_acc), "class_acc": [float(a) for a in class_acc]})
 
     return best_params, model, best_epoch, best_val_acc, float(test_acc), class_acc
 
@@ -394,6 +388,8 @@ def resolve_dataset(dataset: str, num_points: int):
 
 
 def main():
+    jax.config.update("jax_enable_x64", True)
+
     parser = argparse.ArgumentParser()
     parser.add_argument("seed", type=int)
     parser.add_argument("--dataset", type=str, choices=["modelnet", "shapenet", "suo"], required=True)
@@ -406,7 +402,7 @@ def main():
     model_variant = normalize_variant(args.variant)
 
     epochs = 1000
-    lr = 0.01
+    lr = 0.0001
 
     _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, model_variant, lr=lr, epochs=epochs)
 
