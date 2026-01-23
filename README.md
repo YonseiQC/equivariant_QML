@@ -270,7 +270,7 @@ During training/evaluation, the script saves:
 
 
 
-> Full per-seed results are stored in `raw_results.csv`.
+> Full per-seed results are stored in `Full_Results.csv`.
 
 
 
