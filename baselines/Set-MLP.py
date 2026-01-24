@@ -350,7 +350,7 @@ def train_attention_deepsets(
     class_acc, test_acc = class_wise_accuracy(test_true, test_preds, num_classes)
 
     print("\n=== Results ===")
-    print(f"Test Accuracy = {float(test_acc):.4f}")
+    print(f"Test Accuracy: {float(test_acc):.4f}")
     print("Class-wise Accuracy:")
     for i, a in enumerate(class_acc):
         print(f"  Class {i}: {float(a):.4f}")
@@ -379,7 +379,7 @@ def resolve_dataset(dataset: str, num_points: int):
         return "modelnet", f"modelnet40_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
     if d == "shapenet":
         return "shapenet", f"shapenet_5classes_{num_points}_1_fps_train700_val100_test200_new.npz", 5, 0.02
-    if d in {"suo", "scan"}:
+    if d == "suo":
         return "SUO", f"SUO_3classes_{num_points}_1_fps_train700_val100_test200_new.npz", 3, 0.01
     raise ValueError("dataset must be one of: modelnet, shapenet, suo")
 
