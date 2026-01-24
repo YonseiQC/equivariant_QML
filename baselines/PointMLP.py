@@ -532,7 +532,7 @@ def run_experiment(
 
         if val_acc >= best_val:
             best_val = val_acc
-            best_epoch = epoch
+            best_epoch = epoch - 1
             best_state_dict = {k_: v.detach().cpu().clone() for k_, v in model.state_dict().items()}
 
         print(f"epoch {epoch-1}/{epochs-1} | train loss : {train_loss:.4f} | val loss : {val_loss:.4f} | val accuracy : {val_acc:.4f}")
@@ -567,7 +567,7 @@ def run_experiment(
     _metrics_write(
         {
             "final": True,
-            "best_epoch": int(best_epoch - 1),
+            "best_epoch": int(best_epoch),
             "best_val_acc": float(best_val),
             "test_acc": float(overall),
             "class_acc": [float(a) for a in cls_accs],

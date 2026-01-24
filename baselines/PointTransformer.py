@@ -432,7 +432,7 @@ def run_experiment(dataset_file, widths, k, *, num_classes, batch_size, epochs, 
         val_loss = evaluate_loss(model, val_loader, device)
 
         if val_acc >= best_val:
-            best_val, best_epoch = val_acc, epoch
+            best_val, best_epoch = val_acc, epoch - 1
             best_state = {k_: v.detach().cpu().clone() for k_, v in model.state_dict().items()}
 
         print(
@@ -469,7 +469,7 @@ def run_experiment(dataset_file, widths, k, *, num_classes, batch_size, epochs, 
     _metrics_write(
         {
             "final": True,
-            "best_epoch": int(best_epoch - 1),
+            "best_epoch": int(best_epoch),
             "best_val_acc": float(best_val),
             "test_acc": float(overall),
             "class_acc": [float(a) for a in cls_accs],
