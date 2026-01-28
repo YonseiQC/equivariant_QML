@@ -582,7 +582,7 @@ def main():
         model_cfg,
         num_classes=num_classes,
         batch_size=35,
-        epochs=1000,
+        epochs=epochs,
         lr=0.01,
         dropout=0.0,
         sigma=sigma,
