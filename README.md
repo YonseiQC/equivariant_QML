@@ -38,7 +38,6 @@ We use three object-level datasets with small-class subsets:
 
 - **ModelNet-5**: bottle, bowl, cup, lamp, stool  
 - **ShapeNet-5**: birdhouse, bottle, bowl, bus, cap  
-- **Sydney Urban Objects-3 (SUO-3)**: car, traffic sign, pedestrian
 
 ### Download & place raw data
 
@@ -83,20 +82,6 @@ data/ShapeNet/
     <instance_id>/models/model_normalized.obj
 ```
 
-#### Sydney Urban Objects 
-
-Download :
-- https://www.acfr.usyd.edu.au/papers/SydneyUrbanObjectsDataset.shtml
-
-Put the extracted dataset under:
-
-```text
-data/Sydney_Urban_Objects/sydney-urban-objects-dataset/
-  objects/
-    car/ ...
-    traffic_sign/ ...
-    pedestrian/ ...
-```
 
 ### Create NPZ files (sampling)
 
@@ -107,7 +92,7 @@ From the repository root:
 ```bash
 python <sampling_script.py> --num_points <NUM_POINTS>
 ```
-- `<sampling_script.py>` : one of `data/ModelNet/modelnet_sampling.py`, `data/ShapeNet/shapenet_sampling.py`, `data/Sydney_Urban_Objects/SUO_sampling.py`
+- `<sampling_script.py>` : one of `data/ModelNet/modelnet_sampling.py`, `data/ShapeNet/shapenet_sampling.py`
 
 - `<NUM_POINTS>` : number of points per sample (e.g., 3, 4, 5, ...)
 
@@ -120,7 +105,6 @@ The generated `.npz` files will be saved into the corresponding dataset folder:
 
 - `data/ModelNet/`
 - `data/ShapeNet/`
-- `data/Sydney_Urban_Objects/`
 
 
 ---
@@ -158,7 +142,7 @@ where `num_perm` ranges from 2 to `(num_qubit // 2)`.
 ## HyQuRP & baselines
 
 > Make sure the corresponding `.npz` file already exists under:
-> `data/ModelNet/`, `data/ShapeNet/`, or `data/Sydney_Urban_Objects/`.
+> `data/ModelNet/`, `data/ShapeNet/`.
 
 
 ### Run HyQuRP
@@ -171,7 +155,7 @@ python HyQuRP/HyQuRP.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --var
 
 > Make sure the precomputed HyQuRP matrices are available in `HyQuRP/PermMatrix/`.
 
-- `<DATASET>`: `modelnet`, `shapenet`, or `suo`
+- `<DATASET>`: `modelnet`, `shapenet`
 - `<VARIANT>`: `light` or `mid`
 - `num_points = num_qubit // 2` (so `NUM_QUBIT` must be even)
 
@@ -249,27 +233,6 @@ During training/evaluation, the script saves:
 |      5 |        7 | 56.3 ± 2.3 | 58.9 ± 1.8 | 69.6 ± 3.2 | 60.4 ± 1.5 | 51.5 ± 2.8 |        59.1 ± 5.2 |            |         |          | 75.1 ± 1.2 |
 |      6 |        7 | 57.5 ± 2.7 | 60.3 ± 2.5 | 74.2 ± 5.5 | 70.7 ± 2.1 | 53.4 ± 2.1 |        71.4 ± 1.3 |            |         |          | 76.8 ± 2.0 |
 
-
-
-### Sydney Urban Objects
-
-#### Light Version
-
-| points | n(seeds) |        MLP |    Set-MLP |   PointNet |      DGCNN |   PointMLP | Point Transformer | PointMamba |    Mamba3D |   RP‑EQGNN |     HyQuRP |
-| -----: | -------: | ---------: | ---------: | ---------: | ---------: | ---------: | ----------------: | ---------: | ---------: | ---------: | ---------: |
-|      4 |        7 | 65.3 ± 2.4 | 66.0 ± 5.1 | 81.5 ± 2.3 | 73.0 ± 1.7 | 71.8 ± 1.7 |        73.2 ± 1.3 | 81.6 ± 1.3 | 73.0 ± 2.5 | 77.1 ± 1.7 | 83.6 ± 1.1 |
-|      5 |        7 | 60.3 ± 2.1 | 74.6 ± 2.1 | 82.9 ± 0.8 | 76.7 ± 2.2 | 70.7 ± 1.1 |        75.7 ± 2.7 | 81.0 ± 1.6 | 77.0 ± 3.9 | 76.0 ± 0.7 | 77.1 ± 2.5 |
-|      6 |        7 | 60.3 ± 2.2 | 56.3 ± 2.2 | 84.6 ± 1.7 | 77.4 ± 2.1 | 67.2 ± 1.7 |        78.3 ± 0.7 | 80.1 ± 3.1 | 81.5 ± 5.2 | 70.3 ± 3.3 | 78.5 ± 1.9 |
-
-
-#### Mid Version
-
-
-| points | n(seeds) |        MLP |     Set-MLP |   PointNet |      DGCNN |   PointMLP | Point Transformer | PointMamba |    Mamba3D | RP‑EQGNN |     HyQuRP |
-| -----: | -------: | ---------: | ----------: | ---------: | ---------: | ---------: | ----------------: | ---------: | ---------: | -------: | ---------: |
-|      4 |        7 | 69.7 ± 2.6 |  69.6 ± 7.9 | 80.8 ± 3.8 | 73.0 ± 1.7 | 71.9 ± 1.3 |        73.6 ± 1.3 | 80.8 ± 2.2 | 72.9 ± 2.6 |          | 83.4 ± 1.5 |
-|      5 |        7 | 64.3 ± 5.0 | 68.8 ± 10.6 | 84.3 ± 1.4 | 76.7 ± 2.2 | 74.2 ± 1.9 |        76.1 ± 1.0 | 82.5 ± 2.1 | 77.5 ± 5.6 |          | 80.4 ± 1.8 |
-|      6 |        7 | 62.0 ± 3.0 |  64.8 ± 8.6 | 85.6 ± 1.7 | 77.4 ± 2.1 | 68.7 ± 1.1 |       69.6 ± 12.7 | 82.8 ± 1.9 | 79.2 ± 1.9 |          | 79.8 ± 2.2 |
 
 
 
