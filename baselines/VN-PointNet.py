@@ -212,10 +212,6 @@ def calculate_final_metrics(y_true, y_pred, num_classes_):
     return cm, class_accuracies, overall_accuracy
 
 
-def count_parameters(model):
-    return sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-
 # ---- Augmentation: Jitter -> Rotation -> Permutation ----
 
 def _random_3d_rotation(np_rs):
@@ -716,39 +712,6 @@ def resolve_dataset(dataset: str, num_points: int):
     raise ValueError("dataset must be one of: modelnet, shapenet, suo")
 
 
-def invariance_sanity_check(variant: str, n_knn: int, num_classes: int = 5, num_points: int = 6, seed: int = 0):
-    rng = np.random.RandomState(seed)
-    torch.manual_seed(seed)
-
-    model, cfg = make_model(num_classes=num_classes, variant=variant, n_knn=n_knn)
-    model.eval()
-
-    pts = rng.randn(num_points, 3).astype(np.float32)
-    pts = normalize_unit_sphere(pts)
-
-    perm = rng.permutation(num_points)
-    R = special_ortho_group.rvs(3, random_state=rng).astype(np.float32)
-
-    x = torch.from_numpy(pts[None, ...]).float()
-    x_perm = torch.from_numpy(pts[perm][None, ...]).float()
-    x_rot = torch.from_numpy((pts @ R.T)[None, ...]).float()
-    x_both = torch.from_numpy(((pts[perm]) @ R.T)[None, ...]).float()
-
-    with torch.no_grad():
-        y = model(x)
-        y_perm = model(x_perm)
-        y_rot = model(x_rot)
-        y_both = model(x_both)
-
-    return {
-        "variant": variant,
-        "param_count": count_parameters(model),
-        "max_abs_perm_diff": float((y - y_perm).abs().max().item()),
-        "max_abs_rot_diff": float((y - y_rot).abs().max().item()),
-        "max_abs_perm_rot_diff": float((y - y_both).abs().max().item()),
-    }
-
-
 # =============================== Runner ===============================
 
 def run_experiment(
@@ -790,11 +753,8 @@ def run_experiment(
         torch.cuda.manual_seed(seed)
         torch.cuda.manual_seed_all(seed)
 
-    model, cfg = make_model(num_classes=num_classes, variant=variant, n_knn=n_knn)
+    model, _ = make_model(num_classes=num_classes, variant=variant, n_knn=n_knn)
     model = model.to(device)
-    pcount = count_parameters(model)
-
-    sanity = invariance_sanity_check(variant=variant, n_knn=n_knn, num_classes=num_classes, num_points=max(6, num_points), seed=seed)
 
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
@@ -861,17 +821,12 @@ def main():
     parser.add_argument("--num_points", type=int, required=True)
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
     parser.add_argument("--n_knn", type=int, required=True)
-    parser.add_argument("--sanity_only", action="store_true")
     args = parser.parse_args()
 
     base_seed = args.seed
     num_points = args.num_points
     variant = normalize_variant(args.variant)
     dataset_tag, dataset_file, num_classes, sigma = resolve_dataset(args.dataset, num_points)
-
-    if args.sanity_only:
-        print(invariance_sanity_check(variant, n_knn=args.n_knn, num_classes=num_classes, num_points=max(6, num_points), seed=base_seed))
-        return
 
     epochs = 1000
     lr = 1e-2
