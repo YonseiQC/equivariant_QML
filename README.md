@@ -1,7 +1,7 @@
 # HyQuRP
 
 ## Introduction
-HyQuRP is a hybrid quantum–classical neural network that maintains rotational and permutational equivariance in its representations, enabling rotation- and permutation-invariant classification. We show that HyQuRP outperforms most classical and quantum state-of-the-art models on various datasets in the sparse point regime.
+HyQuRP is a hybrid quantum–classical neural network that maintains rotational and permutational equivariance in its representations, enabling rotation- and permutation-invariant classification. We show that HyQuRP outperforms most classical and quantum state-of-the-art models on two datasets in the sparse point regime.
 
 
 <p align="center">
@@ -34,7 +34,7 @@ python3 -m pip install -r requirements-jax-cuda12.txt
 
 ## Data
 
-We use three object-level datasets with small-class subsets:
+We use two object-level datasets with small-class subsets:
 
 - **ModelNet-5**: bottle, bowl, cup, lamp, stool  
 - **ShapeNet-5**: birdhouse, bottle, bowl, bus, cap  
