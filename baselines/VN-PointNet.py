@@ -820,7 +820,7 @@ def main():
     parser.add_argument("--dataset", type=str, choices=["modelnet", "shapenet", "suo"], required=True)
     parser.add_argument("--num_points", type=int, required=True)
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
-    parser.add_argument("--n_knn", type=int, required=True)
+    parser.add_argument("--k", type=int, required=True)
     args = parser.parse_args()
 
     base_seed = args.seed
@@ -831,8 +831,8 @@ def main():
     epochs = 1000
     lr = 1e-2
 
-    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs, k=args.n_knn)
-    print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, n_knn={args.n_knn}, epochs={epochs}, lr={lr}")
+    _setup_run(Path(__file__).stem, base_seed, args.dataset, num_points, variant, lr=lr, epochs=epochs, k=args.k)
+    print(f"seed={base_seed}, dataset={args.dataset}, variant={variant}, num_points={num_points}, n_knn={args.k}, epochs={epochs}, lr={lr}")
 
     HERE = Path(__file__).resolve().parent
     REPO = HERE.parent
@@ -849,7 +849,7 @@ def main():
         dataset_file,
         num_points,
         variant,
-        args.n_knn,
+        args.k,
         num_classes=num_classes,
         batch_size=35,
         epochs=epochs,
