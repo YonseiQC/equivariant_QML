@@ -8,11 +8,7 @@ HyQuRP is a hybrid quantum–classical neural network that maintains rotational 
   <img src="Image1.png" width=700" />
 </p>
 
-<p align="center">
-  <img src="Image2.png" width="420" />
-</p>
-
-![figure](Image3.png)
+![figure](Image12.png)
 
 ---
 
