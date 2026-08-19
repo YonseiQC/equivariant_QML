@@ -187,7 +187,6 @@ class ReflectionGeneratorBank:
         self,
         generator_dir,
         num_qubit,
-        num_generators=10,
         rebuild_cache=False,
         eigen_dtype="float64",
     ):
@@ -196,7 +195,7 @@ class ReflectionGeneratorBank:
         if not manifest_path.is_file():
             raise FileNotFoundError(
                 f"Generator manifest not found: {manifest_path}\n"
-                f"Run create_complete_sym_generators.py --num-qubit {num_qubit} first."
+                f"Run create_reflection_generators.py --num_qubit {num_qubit} first."
             )
         self.manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
         if int(self.manifest["num_qubit"]) != num_qubit:
@@ -225,21 +224,20 @@ class ReflectionGeneratorBank:
             raise ValueError("Generator bank contains no W-breaking direction.")
 
         total_generators = int(self.manifest["num_generators"])
-        if num_generators <= 0:
-            raise ValueError("num_generators must be a positive integer.")
-        if num_generators > total_generators:
+        if total_generators != 206:
             raise ValueError(
-                f"Requested {num_generators} generators, but the bank contains "
-                f"only {total_generators}."
+                f"ReflectionMatrix must contain exactly 206 generators, found {total_generators}."
             )
-        selected_entries = self.manifest["generators"][:num_generators]
-        self.num_generators = len(selected_entries)
+
+        selected_entries = self.manifest["generators"]
+        self.num_generators = 206
         selected_w_breaking = sum(
             float(entry.get("w_commutator_relative_norm", 0.0)) > 1e-7
             for entry in selected_entries
         )
         if selected_w_breaking == 0:
-            raise ValueError("The selected generators contain no W-breaking direction.")
+            raise ValueError("Generator bank contains no W-breaking direction.")
+
         self.eigenvalues = []
         self.eigenvectors = []
         self.component_counts = {
@@ -249,9 +247,9 @@ class ReflectionGeneratorBank:
             )
             for component in ("adjoint_even", "adjoint_odd")
         }
-        if self.component_counts["adjoint_odd"] == 0:
+        if self.component_counts != {"adjoint_even": 134, "adjoint_odd": 72}:
             raise ValueError(
-                "The selected generators contain no (A-A^dagger)/(2i) direction."
+                "ReflectionMatrix must contain 134 adjoint-even and 72 adjoint-odd generators."
             )
 
         cache_dir = self.generator_dir / f"EigenCache_complex_{eigen_dtype}"
@@ -303,10 +301,6 @@ class ReflectionGeneratorBank:
                         f"expected {expected_shape}."
                     )
 
-                                                                             
-                                                                            
-                                                                             
-                                                                        
                 stored_is_single_precision = stored_matrix.dtype in (
                     np.dtype(np.float32),
                     np.dtype(np.complex64),
@@ -324,7 +318,7 @@ class ReflectionGeneratorBank:
 
                 matrix = np.asarray(stored_matrix, dtype=numpy_dtype)
                 del stored_matrix
-                                                                          
+
                 matrix = 0.5 * (matrix + matrix.conj().T)
                 eigenvalues, eigenvectors = scipy_eigh(
                     matrix, overwrite_a=True, check_finite=False, driver="evd"
@@ -432,8 +426,6 @@ def train(
     if len(train_x) != len(train_y) or len(train_x) % minibatch_size:
         raise ValueError("Training split size must match labels and be divisible by minibatch size.")
 
-                                                                          
-                                                   
     parameter_scale = init_scale * math.pi / math.sqrt(generator_bank.num_generators)
     qkey = jax.random.PRNGKey(make_subseed(global_subseed, "init_q_reflection"))
     params_q = parameter_scale * jax.random.uniform(
@@ -481,13 +473,6 @@ def train(
         predictions = jnp.argmax(forward(params_, x), axis=-1)
         return jnp.mean((predictions == y.reshape(-1)).astype(jnp.float32))
 
-    probe_index = int(np.flatnonzero(np.asarray(train_y) == 0)[0])
-    probe_original = jnp.asarray(train_x[probe_index : probe_index + 1])
-    probe_reflected = probe_original.at[..., 0].set(-probe_original[..., 0])
-    print_reflection_probe(
-        "before training", params, probe_original, probe_reflected, quantum_features, forward
-    )
-
     solver = optax.adam(learning_rate=learning_rate)
     opt_state = solver.init(params)
     best_val_acc = -jnp.inf
@@ -514,12 +499,12 @@ def train(
         val_loss = loss_fn(params, val_x, val_y)
         val_acc = accuracy_fn(params, val_x, val_y)
         print(
-            f"epoch {epoch}/{epochs - 1} | train loss: {float(epoch_loss):.4f} | "
-            f"val loss: {float(val_loss):.4f} | val accuracy: {float(val_acc):.4f}"
+            f"epoch {epoch}/{epochs - 1} | train loss : {float(epoch_loss):.4f} | "
+            f"val loss : {float(val_loss):.4f} | val accuracy : {float(val_acc):.4f}"
         )
         _metrics_write(
             {
-                "epoch": epoch,
+                "epoch": int(epoch),
                 "train_loss": float(epoch_loss),
                 "val_loss": float(val_loss),
                 "val_acc": float(val_acc),
@@ -530,36 +515,24 @@ def train(
             best_epoch = epoch
             params_best = tree_map(lambda value: value.copy(), params)
 
-    print_reflection_probe(
-        "best validation checkpoint",
-        params_best,
-        probe_original,
-        probe_reflected,
-        quantum_features,
-        forward,
-    )
-
     logits = forward(params_best, test_x)
     predictions = jnp.argmax(logits, axis=-1)
     matrix, class_accuracies, overall = calculate_final_metrics(
         test_y, predictions, num_classes
     )
     print("\n=== Results ===")
-    print(f"Best epoch: {best_epoch}")
-    print(f"Best validation accuracy: {float(best_val_acc):.4f}")
-    print(f"Test accuracy: {overall:.4f}")
-    print("Confusion matrix:")
-    print(matrix)
+    print(f"Test Accuracy: {float(overall):.4f}")
+    print("Class-wise Accuracy:")
     for class_index, accuracy in enumerate(class_accuracies):
-        print(f"Class {class_index}: {accuracy:.4f}")
+        print(f"  Class {class_index}: {accuracy:.4f}")
 
     _metrics_write(
         {
             "final": True,
-            "best_epoch": best_epoch,
+            "best_epoch": int(best_epoch),
             "best_val_acc": float(best_val_acc),
-            "test_acc": overall,
-            "class_acc": class_accuracies,
+            "test_acc": float(overall),
+            "class_acc": [float(a) for a in class_accuracies],
         }
     )
     return overall
@@ -571,13 +544,11 @@ def main():
     parser.add_argument("seed", type=int)
     parser.add_argument("--num_qubit", type=int, required=True)
     parser.add_argument("--variant", type=str, choices=["light", "mid"], required=True)
-    parser.add_argument("--num_generators", type=int, choices=[10, 206], default=206)
     args = parser.parse_args()
 
     base_seed = args.seed
     num_qubit = args.num_qubit
     variant = args.variant
-    num_generators = args.num_generators
 
     if num_qubit != 10:
         raise ValueError("The reflection dataset contains five points and requires --num_qubit 10.")
@@ -598,10 +569,7 @@ def main():
     generator_dir = here / "ReflectionMatrix"
     data_path = repository_root / "data" / "Reflection" / "reflection_5points_train70_val10_test20.npz"
 
-    run_id = (
-        f"{Path(__file__).stem}_{base_seed}_{num_points}_{variant}"
-        f"_g{num_generators}"
-    )
+    run_id = f"{Path(__file__).stem}_{base_seed}_{num_points}_{variant}"
     stdout_path = repository_root / f"{run_id}.stdout.log"
     config_path = repository_root / f"{run_id}.config.json"
     metrics_path = repository_root / f"{run_id}.metrics.jsonl"
@@ -631,7 +599,6 @@ def main():
     generator_bank = ReflectionGeneratorBank(
         generator_dir,
         num_qubit,
-        num_generators=num_generators,
         rebuild_cache=False,
         eigen_dtype=eigen_dtype,
     )
