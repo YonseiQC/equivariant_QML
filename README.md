@@ -155,6 +155,8 @@ python HyQuRP/HyQuRP.py <SEED> --dataset <DATASET> --num_qubit <NUM_QUBIT> --var
 - `<VARIANT>`: `light` or `mid`
 - `num_points = num_qubit // 2` (so `NUM_QUBIT` must be even)
 
+> Additional scripts used for the ablation study and an additional experiment are also provided under `HyQuRP/` and follow the same input/output conventions as HyQuRP.
+
 ### Run baselines
 
 All baseline scripts live under `baselines/`. Use the same core flags:
