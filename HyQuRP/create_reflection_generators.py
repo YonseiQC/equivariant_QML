@@ -173,9 +173,6 @@ def twirl_orbits(permutation, pair_group):
     }
     inverse_orbit = {inverse_permutation(item) for item in orbit}
 
-                                                                           
-                                                                              
-                                                                  
     canonical_key = min(orbit | inverse_orbit)
     return tuple(sorted(orbit)), tuple(sorted(inverse_orbit)), canonical_key
 
@@ -220,9 +217,7 @@ def component_action(
         return output / len(terms)
 
     if orbit == inverse_orbit:
-                                                                         
-                                                                           
-                                         
+
         return np.zeros_like(probes)
 
     output = np.zeros_like(probes)
@@ -238,7 +233,6 @@ def add_if_independent(vector, orthonormal_basis, relative_tolerance):
     if original_norm == 0:
         return False
 
-                                                                        
     for _ in range(2):
         for basis_vector in orthonormal_basis:
             residual -= np.dot(basis_vector, residual) * basis_vector
@@ -361,15 +355,13 @@ def dense_component_matrix(
     else:
         complex_dtype = np.complex64 if real_dtype == np.float32 else np.complex128
         matrix = np.zeros((dimension, dimension), dtype=complex_dtype)
-                                                                      
+
         coefficient = -0.5j / len(orbit)
         for term in orbit:
             matrix[permutation_rows(term), columns] += coefficient
         for term in inverse_orbit:
             matrix[permutation_rows(term), columns] -= coefficient
 
-                                                                        
-                                  
     matrix_for_norm = matrix.astype(np.complex128, copy=False)
     rms_eigenvalue = math.sqrt(
         float(np.sum(np.abs(matrix_for_norm) ** 2)) / dimension
@@ -426,7 +418,7 @@ def generate(args):
     pair_group = make_pair_permutation_group(num_pairs)
     permutation_rows = PermutationRows(args.num_qubit)
 
-    include_identity = not args.exclude_identity
+    include_identity = True
     saved_even_rank = even_dimension if include_identity else even_dimension - 1
     saved_target_rank = saved_even_rank + odd_dimension
     print(
@@ -498,10 +490,6 @@ def generate(args):
         pair_group[1] if len(pair_group) > 1 else pair_group[0]
     )
 
-                                                                             
-                                                                           
-                                                                              
-                                                                         
     identity_permutation = tuple(range(args.num_qubit))
     nonidentity_even = [
         representative
@@ -657,25 +645,20 @@ def generate(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--num_qubit", type=int, required=True)
-    parser.add_argument("--output_dir", type=Path, default=None)
-    parser.add_argument("--seed", type=int, default=260717)
-    parser.add_argument(
-        "--dtype", choices=("float32", "float64"), default="float32"
-    )
-    parser.add_argument("--sketch_probes", type=int, default=3)
-    parser.add_argument("--verify_probes", type=int, default=5)
-    parser.add_argument("--rank_tolerance", type=float, default=1e-10)
-    parser.add_argument("--max_attempts", type=int, default=10000)
-    parser.add_argument("--allow_larger", action="store_true")
-    parser.add_argument(
-        "--exclude_identity",
-        action="store_true",
-        help=(
-            "Omit the identity generator. The default includes it so the "
-            "saved basis has the complete mathematical dimension."
-        ),
-    )
     args = parser.parse_args()
+
+    if args.num_qubit != 10:
+        raise ValueError("The reflection experiment requires --num_qubit 10.")
+
+    args.output_dir = None
+    args.seed = 260717
+    args.dtype = "float32"
+    args.sketch_probes = 3
+    args.verify_probes = 5
+    args.rank_tolerance = 1e-10
+    args.max_attempts = 10000
+    args.allow_larger = False
+
     generate(args)
 
 if __name__ == "__main__":
